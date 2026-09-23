@@ -1,0 +1,90 @@
+<% pageTitle = siteName + ' · 动态墙'; %>
+<%- include('partials/head') %>
+<section class="page">
+  <h1>动态墙</h1>
+  <p class="muted">多人实时互动：所有人发布的内容都会即时显示。打开两个浏览器窗口试试。</p>
+
+  <% if (user) { %>
+    <form id="post-form" class="post-form">
+      <textarea id="post-input" maxlength="500" placeholder="说点什么……（如：训练安排、比赛通知）" required></textarea>
+      <button class="btn" type="submit">发布</button>
+    </form>
+  <% } else { %>
+    <div class="notice">
+      <p>登录后即可发布内容、参与互动。</p>
+      <a class="btn" href="/login">去登录</a>
+      <a class="btn ghost" href="/register">注册账号</a>
+    </div>
+  <% } %>
+
+  <ul id="posts" class="posts">
+    <% posts.forEach(p => { %>
+      <li class="post" data-id="<%= p.id %>">
+        <div class="post-meta">
+          <span class="post-user"><%= p.username %></span>
+          <span class="post-time"><%= p.created_at %></span>
+        </div>
+        <p class="post-content"><%= p.content %></p>
+        <% if (user && user.username === p.username) { %>
+          <button class="link-btn del" data-id="<%= p.id %>" type="button">删除</button>
+        <% } %>
+      </li>
+    <% }) %>
+    <% if (!posts.length) { %>
+      <li class="empty">还没有内容，来发第一条吧。</li>
+    <% } %>
+  </ul>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const currentUser = <%- JSON.stringify(user ? user.username : null) %>;
+  const postsEl = document.getElementById('posts');
+  const socket = io();
+
+  function timeStr(iso) {
+    try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); }
+    catch (e) { return iso; }
+  }
+  function postEl(p) {
+    const li = document.createElement('li');
+    li.className = 'post';
+    li.dataset.id = p.id;
+    const del = (currentUser && currentUser === p.username)
+      ? '<button class="link-btn del" data-id="' + p.id + '" type="button">删除</button>' : '';
+    li.innerHTML =
+      '<div class="post-meta"><span class="post-user"></span><span class="post-time">' + timeStr(p.created_at) + '</span></div>' +
+      '<p class="post-content"></p>' + del;
+    li.querySelector('.post-user').textContent = p.username;
+    li.querySelector('.post-content').textContent = p.content;
+    return li;
+  }
+
+  socket.on('post:new', (p) => {
+    const empty = postsEl.querySelector('.empty');
+    if (empty) empty.remove();
+    postsEl.prepend(postEl(p));
+  });
+  socket.on('post:deleted', (data) => {
+    const el = postsEl.querySelector('.post[data-id="' + data.id + '"]');
+    if (el) el.remove();
+  });
+
+  const form = document.getElementById('post-form');
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('post-input');
+      const content = input.value.trim();
+      if (!content) return;
+      socket.emit('post:create', { content: content });
+      input.value = '';
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.del');
+    if (!btn) return;
+    socket.emit('post:delete', { id: btn.dataset.id });
+  });
+</script>
+<%- include('partials/foot') %>
