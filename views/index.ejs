@@ -1,12 +1,18 @@
 <% pageTitle = siteName + ' · 首页'; %>
 <%- include('partials/head') %>
 <section class="hero">
-  <p class="eyebrow">团队官网</p>
+  <p class="eyebrow"><%= content.hero.eyebrow %></p>
   <h1><%= siteName %></h1>
-  <p class="lead">这里是射箭队的主页。内容即将上线，你可以先体验右上角的「动态墙」——多人实时发布、即时可见。</p>
+  <p class="lead"><%= content.hero.lead %></p>
   <div class="hero-actions">
     <a class="btn" href="/board">进入动态墙</a>
     <a class="btn ghost" href="/about">关于我们</a>
   </div>
 </section>
+<% if (content.announcement && content.announcement.trim()) { %>
+<div class="announce">
+  <h2>📢 公告</h2>
+  <div class="about-body"><%= content.announcement %></div>
+</div>
+<% } %>
 <%- include('partials/foot') %>
