@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= typeof pageTitle !== 'undefined' ? pageTitle : siteName %></title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav">
+  <a class="brand" href="/">🏹 <%= siteName %></a>
+  <div class="nav-links">
+    <a href="/">首页</a>
+    <a href="/about">关于我们</a>
+    <a href="/board">动态墙</a>
+    <% if (user) { %>
+      <span class="who">你好，<%= user.username %></span>
+      <form method="post" action="/logout" class="inline"><button class="link-btn" type="submit">退出</button></form>
+    <% } else { %>
+      <a href="/login">登录</a>
+      <a class="btn small" href="/register">注册</a>
+    <% } %>
+  </div>
+</nav>
+<main class="main">
