@@ -29,9 +29,19 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 io.engine.use(sessionMiddleware);
 
+// 把当前用户（含角色）注入所有模板，并保持角色最新
 app.use((req, res, next) => {
   res.locals.siteName = SITE_NAME;
-  res.locals.user = req.session.user || null;
+  let user = null;
+  if (req.session.user) {
+    const fresh = db.findUser(req.session.user.username);
+    if (fresh) {
+      user = { id: fresh.id, username: fresh.username, role: fresh.role };
+      req.session.user = user;
+    }
+  }
+  res.locals.user = user;
+  res.locals.isAdmin = !!(user && user.role === 'admin');
   next();
 });
 
@@ -46,14 +56,16 @@ function verifyPassword(pw, stored) {
   const check = crypto.scryptSync(pw, salt, 64).toString('hex');
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
 }
-function requireAuth(req, res, next) {
+function requireAdmin(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
+  const fresh = db.findUser(req.session.user.username);
+  if (!fresh || fresh.role !== 'admin') return res.status(403).send('无权限访问（需要管理员权限）。<a href="/">返回首页</a>');
   next();
 }
 
 // ---------- 页面路由 ----------
-app.get('/', (req, res) => res.render('index'));
-app.get('/about', (req, res) => res.render('about'));
+app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
+app.get('/about', (req, res) => res.render('about', { content: db.getContent() }));
 app.get('/board', (req, res) => res.render('board', { posts: db.listPosts() }));
 
 app.get('/login', (req, res) => res.render('login', { error: null }));
@@ -63,7 +75,7 @@ app.post('/login', (req, res) => {
   if (!user || !verifyPassword(String(password || ''), user.hash)) {
     return res.status(401).render('login', { error: '用户名或密码错误' });
   }
-  req.session.user = { id: user.id, username: user.username };
+  req.session.user = { id: user.id, username: user.username, role: user.role };
   res.redirect('/board');
 });
 
@@ -76,7 +88,7 @@ app.post('/register', (req, res) => {
   if (p.length < 6) return res.status(400).render('register', { error: '密码至少 6 位' });
   try {
     const user = db.createUser(u, hashPassword(p));
-    req.session.user = { id: user.id, username: user.username };
+    req.session.user = { id: user.id, username: user.username, role: user.role };
     res.redirect('/board');
   } catch (e) {
     res.status(400).render('register', { error: e.message || '注册失败' });
@@ -85,6 +97,43 @@ app.post('/register', (req, res) => {
 
 app.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
+});
+
+// ---------- 管理员工作台 ----------
+app.get('/admin', requireAdmin, (req, res) => {
+  res.render('admin', { content: db.getContent(), users: db.listUsers(), posts: db.listPosts(), ok: !!req.query.ok });
+});
+
+// 编辑网站内容
+app.post('/admin/content', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  db.updateContent({
+    hero: { eyebrow: String(b.eyebrow || ''), lead: String(b.lead || '') },
+    announcement: String(b.announcement || ''),
+    about: String(b.about || ''),
+  });
+  res.redirect('/admin?ok=1');
+});
+
+// 指定 / 调整成员角色
+app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const role = String((req.body && req.body.role) || '');
+  if (role !== 'admin' && role !== 'member') return res.redirect('/admin');
+  if (id === Number(req.session.user.id)) return res.redirect('/admin'); // 不能改自己的角色
+  const admins = db.listUsers().filter((u) => u.role === 'admin');
+  const target = db.listUsers().find((u) => u.id === id);
+  if (target && target.role === 'admin' && role === 'member' && admins.length <= 1) {
+    return res.redirect('/admin'); // 不能降级最后一个管理员
+  }
+  db.setUserRole(id, role);
+  res.redirect('/admin');
+});
+
+// 管理员删除任意动态
+app.post('/admin/posts/:id/delete', requireAdmin, (req, res) => {
+  db.deletePostAsAdmin(req.params.id);
+  res.redirect('/admin');
 });
 
 // ---------- Socket.io 实时交互 ----------
@@ -101,13 +150,14 @@ io.on('connection', (socket) => {
     io.emit('post:new', post);
   });
 
-  // 删除自己的内容 → 广播给所有在线用户（实时）
+  // 删除内容 → 本人删自己的，管理员删任意
   socket.on('post:delete', (payload) => {
     if (!user) return;
     const id = payload && payload.id;
-    if (id != null && db.deletePost(id, user.id)) {
-      io.emit('post:deleted', { id });
-    }
+    const fresh = db.findUser(user.username);
+    const isAdmin = fresh && fresh.role === 'admin';
+    const ok = isAdmin ? db.deletePostAsAdmin(id) : db.deletePost(id, user.id);
+    if (ok) io.emit('post:deleted', { id });
   });
 });
 
