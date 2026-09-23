@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: archery-team-site
+    runtime: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
