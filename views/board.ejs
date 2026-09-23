@@ -25,7 +25,7 @@
           <span class="post-time"><%= p.created_at %></span>
         </div>
         <p class="post-content"><%= p.content %></p>
-        <% if (user && user.username === p.username) { %>
+        <% if (user && (isAdmin || user.username === p.username)) { %>
           <button class="link-btn del" data-id="<%= p.id %>" type="button">删除</button>
         <% } %>
       </li>
@@ -39,6 +39,7 @@
 <script src="/socket.io/socket.io.js"></script>
 <script>
   const currentUser = <%- JSON.stringify(user ? user.username : null) %>;
+  const currentIsAdmin = <%- JSON.stringify(isAdmin ? true : false) %>;
   const postsEl = document.getElementById('posts');
   const socket = io();
 
@@ -50,7 +51,7 @@
     const li = document.createElement('li');
     li.className = 'post';
     li.dataset.id = p.id;
-    const del = (currentUser && currentUser === p.username)
+    const del = (currentUser && (currentIsAdmin || currentUser === p.username))
       ? '<button class="link-btn del" data-id="' + p.id + '" type="button">删除</button>' : '';
     li.innerHTML =
       '<div class="post-meta"><span class="post-user"></span><span class="post-time">' + timeStr(p.created_at) + '</span></div>' +
