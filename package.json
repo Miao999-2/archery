@@ -7,7 +7,7 @@
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=23.4.0"
   },
   "dependencies": {
     "ejs": "^3.1.10",
