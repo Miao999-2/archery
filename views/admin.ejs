@@ -1,0 +1,82 @@
+<% pageTitle = siteName + ' · 工作台'; %>
+<%- include('partials/head') %>
+<div class="admin-panel">
+  <h1>工作台</h1>
+  <p class="muted">只有管理员能进入。改完内容保存后即时生效。</p>
+  <% if (ok) { %><p class="ok">已保存 ✓</p><% } %>
+
+  <section>
+    <h2>编辑网站内容</h2>
+    <form method="post" action="/admin/content">
+      <div class="admin-field">
+        <label>首页小标题</label>
+        <input name="eyebrow" value="<%= content.hero.eyebrow %>">
+      </div>
+      <div class="admin-field">
+        <label>首页说明文字</label>
+        <textarea name="lead" rows="3"><%= content.hero.lead %></textarea>
+      </div>
+      <div class="admin-field">
+        <label>首页公告（可留空）</label>
+        <textarea name="announcement" rows="3"><%= content.announcement %></textarea>
+      </div>
+      <div class="admin-field">
+        <label>关于我们</label>
+        <textarea name="about" rows="6"><%= content.about %></textarea>
+      </div>
+      <button class="btn" type="submit">保存内容</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>成员管理（指定管理员）</h2>
+    <table class="user-table">
+      <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead>
+      <tbody>
+        <% users.forEach(u => { %>
+        <tr>
+          <td><%= u.username %><% if (user && u.id === user.id) { %> <span class="muted">（我）</span><% } %></td>
+          <td><span class="badge <%= u.role %>"><%= u.role === 'admin' ? '管理员' : '成员' %></span></td>
+          <td class="muted"><%= u.created_at %></td>
+          <td>
+            <% if (user && u.id !== user.id) { %>
+              <form method="post" action="/admin/users/<%= u.id %>/role" class="inline">
+                <% if (u.role === 'admin') { %>
+                  <input type="hidden" name="role" value="member">
+                  <button class="link-btn" type="submit">取消管理员</button>
+                <% } else { %>
+                  <input type="hidden" name="role" value="admin">
+                  <button class="btn small" type="submit">设为管理员</button>
+                <% } %>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>动态管理</h2>
+    <% if (!posts.length) { %>
+      <p class="muted">还没有任何动态。</p>
+    <% } else { %>
+      <ul class="posts">
+        <% posts.forEach(p => { %>
+          <li class="post">
+            <div class="post-meta">
+              <span class="post-user"><%= p.username %></span>
+              <span class="post-time"><%= p.created_at %></span>
+            </div>
+            <p class="post-content"><%= p.content %></p>
+            <form method="post" action="/admin/posts/<%= p.id %>/delete" class="inline">
+              <button class="link-btn del" type="submit">删除</button>
+            </form>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </section>
+</div>
+<%- include('partials/foot') %>
