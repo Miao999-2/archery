@@ -14,8 +14,8 @@
         <span class="avatar-lg avatar-placeholder">🏹</span>
       <% } %>
       <form method="post" action="/settings/avatar" enctype="multipart/form-data" class="avatar-form">
-        <label>从本地选择图片（PNG / JPG / GIF / WebP，≤2MB）
-          <input type="file" name="avatar" accept="image/*" required>
+        <label>从本地选择图片（PNG / JPG / JPEG / GIF，过大的图片会自动压缩）
+          <input type="file" name="avatar" accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif" required>
         </label>
         <button class="btn small" type="submit">上传头像</button>
       </form>
