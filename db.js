@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   content TEXT NOT NULL,
+  image TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS notices (
   admin_id INTEGER NOT NULL,
   title TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '',
+  pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS post_comments (
@@ -85,6 +87,11 @@ CREATE TABLE IF NOT EXISTS post_likes (
   created_at TEXT NOT NULL,
   PRIMARY KEY (post_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS sessions (
+  sid TEXT PRIMARY KEY,
+  sess TEXT NOT NULL,
+  expire INTEGER
+);
 `);
 
 // 迁移：为旧库补充新列。ALTER 只加列、不动已有数据。
@@ -97,6 +104,8 @@ ensureColumn('users', 'nickname', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('users', 'avatar', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('users', 'status', "TEXT NOT NULL DEFAULT 'approved'");
 ensureColumn('users', 'reason', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('posts', 'image', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('notices', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
 
 // 迁移：把旧数据的 UTC 时间戳一次性转成北京时间字符串（含 T 的 ISO 串 → YYYY-MM-DD HH:mm:ss）
 convertLegacyTimestamps();
@@ -223,24 +232,25 @@ function setUserRole(id, role) {
 }
 
 // ---------- 动态 ----------
-function createPost(userId, content) {
+function createPost(userId, content, image = '') {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(userId));
   if (!user) throw new Error('用户不存在');
   const ts = now();
-  const info = db.prepare('INSERT INTO posts(user_id, content, created_at) VALUES(?, ?, ?)')
-    .run(user.id, content, ts);
+  const info = db.prepare('INSERT INTO posts(user_id, content, image, created_at) VALUES(?, ?, ?, ?)')
+    .run(user.id, content, image || '', ts);
   return {
     id: Number(info.lastInsertRowid),
     username: user.username,
     display_name: user.nickname || user.username,
     avatar: user.avatar,
     content,
+    image: image || '',
     created_at: ts,
   };
 }
 function listPosts() {
   return db.prepare(`
-    SELECT p.id, p.content, p.created_at, u.username, u.avatar,
+    SELECT p.id, p.content, p.image, p.created_at, u.username, u.avatar,
            COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM posts p JOIN users u ON u.id = p.user_id
     ORDER BY p.id DESC LIMIT 200
@@ -248,7 +258,7 @@ function listPosts() {
 }
 function listPostsByUser(userId) {
   return db.prepare(`
-    SELECT p.id, p.content, p.created_at, u.username, u.avatar,
+    SELECT p.id, p.content, p.image, p.created_at, u.username, u.avatar,
            COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM posts p JOIN users u ON u.id = p.user_id
     WHERE p.user_id = ? ORDER BY p.id DESC LIMIT 100
@@ -353,15 +363,21 @@ function createNotice(adminId, title, content) {
   const ts = now();
   const info = db.prepare('INSERT INTO notices(admin_id, title, content, created_at) VALUES(?, ?, ?, ?)')
     .run(Number(adminId), title, content, ts);
-  return { id: Number(info.lastInsertRowid), title, content, created_at: ts };
+  return { id: Number(info.lastInsertRowid), title, content, pinned: 0, created_at: ts };
 }
 function listNotices() {
   return db.prepare(`
-    SELECT n.id, n.title, n.content, n.created_at, u.avatar, u.username,
+    SELECT n.id, n.title, n.content, n.pinned, n.created_at, u.avatar, u.username,
            COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM notices n JOIN users u ON u.id = n.admin_id
-    ORDER BY n.id DESC
+    ORDER BY n.pinned DESC, n.id DESC
   `).all();
+}
+function getNotice(id) {
+  return db.prepare('SELECT * FROM notices WHERE id = ?').get(Number(id)) || null;
+}
+function setNoticePinned(id, pinned) {
+  return db.prepare('UPDATE notices SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, Number(id)).changes > 0;
 }
 function deleteNotice(id) {
   return db.prepare('DELETE FROM notices WHERE id = ?').run(Number(id)).changes > 0;
@@ -445,6 +461,32 @@ function getLikeInfoByPosts(ids, userId) {
   return map;
 }
 
+// ---------- 会话（登录态持久化到 SQLite，随备份一起保存，服务器重启/更新后仍保持登录） ----------
+function getSession(sid) {
+  const row = db.prepare('SELECT sess, expire FROM sessions WHERE sid = ?').get(String(sid));
+  if (!row) return null;
+  if (row.expire && row.expire < Date.now()) {
+    db.prepare('DELETE FROM sessions WHERE sid = ?').run(String(sid));
+    return null;
+  }
+  return row.sess;
+}
+function setSession(sid, sess, maxAge) {
+  const expire = maxAge ? Date.now() + Number(maxAge) : null;
+  db.prepare('INSERT INTO sessions(sid, sess, expire) VALUES(?, ?, ?) ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expire = excluded.expire')
+    .run(String(sid), String(sess), expire);
+}
+function destroySession(sid) {
+  db.prepare('DELETE FROM sessions WHERE sid = ?').run(String(sid));
+}
+function touchSession(sid, maxAge) {
+  const expire = maxAge ? Date.now() + Number(maxAge) : null;
+  db.prepare('UPDATE sessions SET expire = ? WHERE sid = ?').run(expire, String(sid));
+}
+function cleanupSessions() {
+  db.prepare('DELETE FROM sessions WHERE expire IS NOT NULL AND expire < ?').run(Date.now());
+}
+
 module.exports = {
   createUser, findUser, getUserById, getPublicProfile, listUsers, listUsersByStatus,
   setUserRole, setUserStatus, updateProfile, updateUserAvatar, deleteUser,
@@ -453,8 +495,9 @@ module.exports = {
   createLog, listLogs, getLog, updateLog, deleteLog,
   addComment, listComments,
   addDanmaku, listDanmaku,
-  createNotice, listNotices, deleteNotice,
+  createNotice, listNotices, getNotice, setNoticePinned, deleteNotice,
   addPostComment, listPostCommentsByPosts, deletePostComment,
   toggleLike, getLikeInfoByPosts,
+  getSession, setSession, destroySession, touchSession, cleanupSessions,
   checkpoint,
 };
