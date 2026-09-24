@@ -1,75 +1,90 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-// 数据库备份到 Cloudflare R2（S3 兼容对象存储），解决 Render 免费版临时盘丢数据问题。
-// 未配置 R2 环境变量时，所有函数自动跳过（本地开发零影响）。
+// 数据备份到 GitHub 私密仓库（AES-256-GCM 加密存储），解决 Render 免费版临时盘丢数据问题。
+// 未配置环境变量时，所有函数自动跳过（本地开发零影响）。
+// 需要环境变量：GITHUB_TOKEN（你的 PAT）、BACKUP_REPO（如 Miao999-2/archery-backup）、BACKUP_SECRET（加密密钥）
 const DB_FILE = path.join(__dirname, 'data.sqlite');
-const KEY = 'backup/data.sqlite'; // 云端唯一备份对象，始终覆盖为最新快照
+const KEY = 'data.sqlite.enc'; // 备份对象在仓库根目录，始终覆盖为最新快照
 
 function isConfigured() {
-  return !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID &&
-            process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET);
+  return !!(process.env.GITHUB_TOKEN && process.env.BACKUP_REPO && process.env.BACKUP_SECRET);
+}
+function repo() { return process.env.BACKUP_REPO; }
+
+// 加密：密钥由 BACKUP_SECRET 派生；即使仓库泄露也无法读取内容
+function key() { return crypto.scryptSync(String(process.env.BACKUP_SECRET), 'archery-backup-v1', 32); }
+function encrypt(buf) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key(), iv);
+  const enc = Buffer.concat([c.update(buf), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), enc]); // iv(12) + tag(16) + 密文
+}
+function decrypt(buf) {
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const enc = buf.subarray(28);
+  const d = crypto.createDecipheriv('aes-256-gcm', key(), iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(enc), d.final()]);
 }
 
-function getS3() {
-  const { S3Client } = require('@aws-sdk/client-s3');
-  return new S3Client({
-    region: 'auto',
-    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+async function gh(p, options = {}) {
+  return fetch(`https://api.github.com${p}`, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `token ${process.env.GITHUB_TOKEN}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
     },
+    body: options.body,
   });
 }
 
-// 启动时恢复：云端有备份就下载覆盖本地 data.sqlite，返回是否真正恢复了数据
-async function restoreFromR2() {
+// 启动时恢复：云端有备份就下载解密覆盖本地 data.sqlite
+async function restoreBackup() {
   if (!isConfigured()) return false;
-  const { GetObjectCommand } = require('@aws-sdk/client-s3');
-  const s3 = getS3();
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const res = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET, Key: KEY }));
-      const bytes = await res.Body.transformToByteArray();
-      if (bytes && bytes.length) {
-        fs.writeFileSync(DB_FILE, Buffer.from(bytes));
-        // 清掉可能残留的 WAL/SHM，避免与刚恢复的主文件不一致
-        for (const suffix of ['-wal', '-shm']) {
-          const f = DB_FILE + suffix;
-          if (fs.existsSync(f)) fs.rmSync(f);
-        }
-        console.log('[backup] 已从 R2 恢复数据库备份');
-        return true;
-      }
-      return false;
-    } catch (e) {
-      const notFound = e && (e.name === 'NoSuchKey' || (e.$metadata && e.$metadata.httpStatusCode === 404));
-      if (notFound) return false; // 还没有备份，首次部署
-      console.error(`[backup] 恢复失败（第 ${attempt} 次）:`, e.message);
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 1000));
+  const p = `/repos/${repo()}/contents/${KEY}`;
+  try {
+    const res = await gh(p);
+    if (res.status === 404) return false; // 尚无备份
+    if (res.status !== 200) { console.error('[backup] 读取备份失败:', res.status); return false; }
+    const body = await res.json();
+    const plain = decrypt(Buffer.from(body.content, 'base64'));
+    fs.writeFileSync(DB_FILE, plain);
+    for (const suffix of ['-wal', '-shm']) {
+      const f = DB_FILE + suffix;
+      if (fs.existsSync(f)) fs.rmSync(f);
     }
+    console.log('[backup] 已从 GitHub 恢复数据备份');
+    return true;
+  } catch (e) {
+    console.error('[backup] 恢复失败:', e.message);
+    return false;
   }
-  return false;
 }
 
-// 上传本地 data.sqlite 到 R2（调用前应先由 db.checkpoint() 把 WAL 合并进主文件）
-async function uploadNow() {
+// 上传加密后的 data.sqlite 到私密仓库（调用前应先 db.checkpoint() 合并 WAL）
+async function uploadBackup() {
   if (!isConfigured()) return false;
   if (!fs.existsSync(DB_FILE)) return false;
-  const { PutObjectCommand } = require('@aws-sdk/client-s3');
-  const s3 = getS3();
+  const enc = encrypt(fs.readFileSync(DB_FILE));
+  const p = `/repos/${repo()}/contents/${KEY}`;
   try {
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET,
-      Key: KEY,
-      Body: fs.readFileSync(DB_FILE),
-    }));
-    return true;
+    let sha = null;
+    const existing = await gh(p);
+    if (existing.status === 200) sha = (await existing.json()).sha;
+    const payload = { message: 'backup ' + new Date().toISOString(), content: enc.toString('base64'), branch: 'main' };
+    if (sha) payload.sha = sha;
+    const res = await gh(p, { method: 'PUT', body: JSON.stringify(payload) });
+    if (res.status >= 200 && res.status < 300) return true;
+    console.error('[backup] 上传失败:', res.status, await res.text().catch(() => ''));
+    return false;
   } catch (e) {
     console.error('[backup] 备份失败:', e.message);
     return false;
   }
 }
 
-module.exports = { isConfigured, restoreFromR2, uploadNow };
+module.exports = { isConfigured, restoreBackup, uploadBackup };
