@@ -23,11 +23,12 @@
   </section>
 
   <section class="settings-card">
-    <h2>昵称</h2>
-    <p class="muted">用户名用于登录，不能修改。昵称对外展示，留空则展示用户名。</p>
+    <h2>昵称 / 个人简介</h2>
+    <p class="muted">用户名用于登录，不能修改。昵称对外展示，留空则展示用户名；个人简介展示在个人主页。</p>
     <form method="post" action="/settings" class="form">
       <label>昵称（30 字以内）<input name="nickname" maxlength="30" value="<%= u ? u.nickname : '' %>" placeholder="例如：青木澄"></label>
-      <button class="btn" type="submit">保存昵称</button>
+      <label>个人简介（200 字以内）<textarea name="bio" maxlength="200" rows="3" placeholder="介绍一下自己……"><%= u ? u.bio : '' %></textarea></label>
+      <button class="btn" type="submit">保存</button>
     </form>
   </section>
 </section>
