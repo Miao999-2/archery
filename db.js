@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
   nickname TEXT NOT NULL DEFAULT '',
+  bio TEXT NOT NULL DEFAULT '',
   avatar TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'approved',
   reason TEXT NOT NULL DEFAULT '',
@@ -101,6 +102,7 @@ function ensureColumn(table, col, ddl) {
 }
 ensureColumn('post_comments', 'parent_id', 'INTEGER');
 ensureColumn('users', 'nickname', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'bio', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('users', 'avatar', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('users', 'status', "TEXT NOT NULL DEFAULT 'approved'");
 ensureColumn('users', 'reason', "TEXT NOT NULL DEFAULT ''");
@@ -190,7 +192,7 @@ function getUserById(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(Number(id)) || null;
 }
 function getPublicProfile(username) {
-  const u = db.prepare('SELECT id, username, nickname, avatar, role, status, created_at FROM users WHERE username = ?').get(username);
+  const u = db.prepare('SELECT id, username, nickname, bio, avatar, role, status, created_at FROM users WHERE username = ?').get(username);
   if (!u) return null;
   u.display_name = u.nickname || u.username;
   return u;
@@ -205,8 +207,9 @@ function setUserStatus(id, status) {
   if (status !== 'approved' && status !== 'pending' && status !== 'rejected') return false;
   return db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, Number(id)).changes > 0;
 }
-function updateProfile(userId, nickname) {
-  return db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(String(nickname || '').trim(), Number(userId)).changes > 0;
+function updateProfile(userId, nickname, bio = '') {
+  return db.prepare('UPDATE users SET nickname = ?, bio = ? WHERE id = ?')
+    .run(String(nickname || '').trim(), String(bio || '').trim(), Number(userId)).changes > 0;
 }
 function updateUserAvatar(userId, avatar) {
   return db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(String(avatar || ''), Number(userId)).changes > 0;
