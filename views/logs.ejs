@@ -1,0 +1,29 @@
+<% pageTitle = siteName + ' · 训练日志'; %>
+<%- include('partials/head') %>
+<section class="page">
+  <div class="logs-head">
+    <h1>训练日志</h1>
+    <% if (isAdmin) { %><a class="btn" href="/logs/new">＋ 创建日志</a><% } %>
+  </div>
+  <p class="muted">记录每一次训练：心得、成绩、视频回放与队友互动。</p>
+
+  <% if (!logs.length) { %>
+    <p class="empty">还没有日志。管理员登录后可点右上角「创建日志」。</p>
+  <% } else { %>
+    <div class="log-grid">
+      <% logs.forEach(l => { %>
+        <a class="log-card" href="/logs/<%= l.id %>">
+          <% if (l.cover_image) { %>
+            <div class="log-cover" style="background-image:url('<%= l.cover_image %>')"></div>
+          <% } %>
+          <div class="log-card-body">
+            <h3><%= l.title %></h3>
+            <p class="muted"><%= l.admin_name %> · <%= l.created_at %></p>
+            <% if (l.video_url) { %><span class="badge member">含视频</span><% } %>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+  <% } %>
+</section>
+<%- include('partials/foot') %>
