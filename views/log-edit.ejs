@@ -1,0 +1,76 @@
+<% pageTitle = siteName + (log ? ' · 编辑日志' : ' · 创建日志'); %>
+<%- include('partials/head') %>
+<section class="page">
+  <h1><%= log ? '编辑日志' : '创建日志' %></h1>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+  <form method="post" action="<%= log ? '/logs/' + log.id : '/logs' %>" class="log-form" onsubmit="if (window.tinymce) tinymce.triggerSave()">
+    <div class="admin-field">
+      <label>标题</label>
+      <input name="title" value="<%= log ? log.title : '' %>" required>
+    </div>
+    <div class="admin-field">
+      <label>内容（富文本：加粗 / 标题 / 列表 / 插图 / 表格）</label>
+      <textarea id="content" name="content"></textarea>
+    </div>
+    <div class="admin-field">
+      <label>封面图片 URL（可留空）</label>
+      <input name="cover_image" value="<%= log ? log.cover_image : '' %>" placeholder="例如 /uploads/xxxx.png">
+    </div>
+    <div class="admin-field">
+      <label>视频 URL（用于弹幕，可留空）</label>
+      <input name="video_url" value="<%= log ? log.video_url : '' %>" placeholder="例如 /uploads/xxxx.mp4">
+    </div>
+    <div class="upload-row">
+      <div class="admin-field">
+        <label>上传封面图（PNG/JPG，自动填到上方）</label>
+        <input type="file" id="img-file" accept="image/png,image/jpeg,image/jpg">
+      </div>
+      <div class="admin-field">
+        <label>上传视频（MP4，自动填到上方）</label>
+        <input type="file" id="video-file" accept="video/mp4">
+      </div>
+    </div>
+    <button class="btn" type="submit">保存日志</button>
+  </form>
+</section>
+<script src="https://cdn.jsdelivr.net/npm/tinymce@6.8.6/tinymce.min.js"></script>
+<script>
+  async function uploadTo(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const j = await res.json();
+    if (!j.url) throw new Error(j.error || '上传失败');
+    return j.url;
+  }
+  function bindUpload(inputEl, fieldName) {
+    inputEl.addEventListener('change', async () => {
+      const f = inputEl.files[0];
+      if (!f) return;
+      try {
+        const url = await uploadTo(f);
+        document.querySelector('[name="' + fieldName + '"]').value = url;
+        inputEl.value = '';
+      } catch (e) { alert(e.message); }
+    });
+  }
+  bindUpload(document.getElementById('img-file'), 'cover_image');
+  bindUpload(document.getElementById('video-file'), 'video_url');
+
+  tinymce.init({
+    selector: '#content',
+    height: 420,
+    menubar: false,
+    plugins: 'lists link image table code',
+    toolbar: 'undo redo | blocks | bold italic underline | bullist numlist | link image table | removeformat code',
+    images_upload_handler: async (blobInfo) => {
+      return await uploadTo(blobInfo.blob());
+    },
+    setup: (editor) => {
+      editor.on('init', () => {
+        editor.setContent(<%- JSON.stringify(log ? log.content : '').replace(/<\//g, '<\\/') %>);
+      });
+    },
+  });
+</script>
+<%- include('partials/foot') %>
