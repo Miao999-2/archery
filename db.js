@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS post_comments (
   post_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   content TEXT NOT NULL,
+  parent_id INTEGER,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS post_likes (
@@ -81,6 +82,14 @@ CREATE TABLE IF NOT EXISTS post_likes (
   PRIMARY KEY (post_id, user_id)
 );
 `);
+
+// 迁移：为旧库补上 parent_id 列（评论回复功能）。ALTER 只加列、不动已有数据。
+{
+  const cols = db.prepare('PRAGMA table_info(post_comments)').all();
+  if (!cols.some((c) => c.name === 'parent_id')) {
+    db.exec('ALTER TABLE post_comments ADD COLUMN parent_id INTEGER');
+  }
+}
 
 function now() { return new Date().toISOString(); }
 
@@ -260,22 +269,43 @@ function deleteNotice(id) {
 }
 
 // ---------- 动态评论 ----------
-function addPostComment(postId, userId, content) {
+function addPostComment(postId, userId, content, parentId = null) {
   const user = db.prepare('SELECT username FROM users WHERE id = ?').get(Number(userId));
   const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(Number(postId));
   if (!user || !post) return null;
+  let pid = null;
+  if (parentId) {
+    const parent = db.prepare('SELECT id, post_id FROM post_comments WHERE id = ?').get(Number(parentId));
+    if (!parent || parent.post_id !== Number(postId)) return null; // 父评论必须属于同一条动态
+    pid = Number(parentId);
+  }
   const ts = now();
-  const info = db.prepare('INSERT INTO post_comments(post_id, user_id, content, created_at) VALUES(?, ?, ?, ?)')
-    .run(Number(postId), Number(userId), content, ts);
-  return { id: Number(info.lastInsertRowid), post_id: Number(postId), username: user.username, content, created_at: ts };
+  const info = db.prepare('INSERT INTO post_comments(post_id, user_id, content, parent_id, created_at) VALUES(?, ?, ?, ?, ?)')
+    .run(Number(postId), Number(userId), content, pid, ts);
+  return getPostComment(Number(info.lastInsertRowid));
+}
+function getPostComment(id) {
+  return db.prepare(`
+    SELECT pc.id, pc.post_id, pc.content, pc.created_at, pc.parent_id,
+           u.username, pu.username AS reply_to
+    FROM post_comments pc
+    JOIN users u ON u.id = pc.user_id
+    LEFT JOIN post_comments pp ON pp.id = pc.parent_id
+    LEFT JOIN users pu ON pu.id = pp.user_id
+    WHERE pc.id = ?
+  `).get(Number(id)) || null;
 }
 function listPostCommentsByPosts(ids) {
   const map = {};
   if (!ids || !ids.length) return map;
   const ph = ids.map(() => '?').join(',');
   const rows = db.prepare(`
-    SELECT pc.id, pc.post_id, pc.content, pc.created_at, u.username
-    FROM post_comments pc JOIN users u ON u.id = pc.user_id
+    SELECT pc.id, pc.post_id, pc.content, pc.created_at, pc.parent_id,
+           u.username, pu.username AS reply_to
+    FROM post_comments pc
+    JOIN users u ON u.id = pc.user_id
+    LEFT JOIN post_comments pp ON pp.id = pc.parent_id
+    LEFT JOIN users pu ON pu.id = pp.user_id
     WHERE pc.post_id IN (${ph}) ORDER BY pc.id ASC
   `).all(...ids.map(Number));
   for (const r of rows) (map[r.post_id] || (map[r.post_id] = [])).push(r);
