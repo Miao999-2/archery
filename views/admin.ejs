@@ -65,7 +65,7 @@
         <% users.forEach(u => { %>
         <tr>
           <td><%= u.username %><% if (user && u.id === user.id) { %> <span class="muted">（我）</span><% } %></td>
-          <td><%= u.nickname || '—' %></td>
+          <td><a class="post-user" href="/u/<%= u.username %>"><%= u.nickname || u.username %></a></td>
           <td><span class="badge <%= u.role %>"><%= u.role === 'admin' ? '管理员' : '成员' %></span></td>
           <td class="muted"><%= u.created_at %></td>
           <td>
