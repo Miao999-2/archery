@@ -1,9 +1,11 @@
-const fs = require('fs');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 
-// 纯 JSON 文件存储：不依赖 node:sqlite，任何 Node 版本都能跑，
-// 方便部署到 Glitch 等免费平台（它们有持久磁盘，数据能保留）。
-const DATA_FILE = path.join(__dirname, 'data.json');
+// SQLite 数据库（Node 内置 node:sqlite：同步 API、零编译、零依赖，Node 24+ 直接可用）
+const DB_FILE = path.join(__dirname, 'data.sqlite');
+const db = new DatabaseSync(DB_FILE);
+db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA foreign_keys = ON;');
 
 const DEFAULT_CONTENT = {
   hero: {
@@ -14,106 +16,201 @@ const DEFAULT_CONTENT = {
   about: '这里放射箭队的介绍：成立时间、成员、荣誉、训练安排等。内容待补充。',
 };
 
-let db = { users: [], posts: [], content: {}, seq: { user: 1, post: 1 } };
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  cover_image TEXT NOT NULL DEFAULT '',
+  video_url TEXT NOT NULL DEFAULT '',
+  admin_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS danmaku (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  video_time REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+`);
 
-function load() {
+function now() { return new Date().toISOString(); }
+
+// ---------- 网站内容 ----------
+function getContent() {
+  let stored = {};
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const loaded = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      if (loaded && Array.isArray(loaded.users) && Array.isArray(loaded.posts)) {
-        db = Object.assign(db, loaded);
-      }
-    }
-  } catch (e) {
-    console.error('读取 data.json 失败，使用空数据：', e.message);
-  }
+    const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('content');
+    if (row) stored = JSON.parse(row.value);
+  } catch (e) { stored = {}; }
+  return {
+    hero: Object.assign({}, DEFAULT_CONTENT.hero, stored.hero || {}),
+    announcement: typeof stored.announcement === 'string' ? stored.announcement : DEFAULT_CONTENT.announcement,
+    about: typeof stored.about === 'string' ? stored.about : DEFAULT_CONTENT.about,
+  };
 }
-function save() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-  } catch (e) {
-    console.error('写入 data.json 失败：', e.message);
-  }
+function updateContent(patch) {
+  const cur = getContent();
+  const next = {
+    hero: Object.assign({}, cur.hero, (patch && patch.hero) || {}),
+    announcement: typeof patch.announcement === 'string' ? patch.announcement : cur.announcement,
+    about: typeof patch.about === 'string' ? patch.about : cur.about,
+  };
+  db.prepare('INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run('content', JSON.stringify(next));
+  return next;
 }
-function now() {
-  return new Date().toISOString();
+
+// ---------- 用户 ----------
+function createUser(username, hash, email = '') {
+  const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  const role = count === 0 ? 'admin' : 'member'; // 第一个注册的用户自动成为管理员
+  const info = db.prepare('INSERT INTO users(username, email, hash, role, created_at) VALUES(?, ?, ?, ?, ?)')
+    .run(username, email, hash, role, now());
+  return { id: Number(info.lastInsertRowid), username, role };
 }
-load();
+function findUser(username) {
+  return db.prepare('SELECT * FROM users WHERE username = ?').get(username) || null;
+}
+function listUsers() {
+  return db.prepare('SELECT id, username, email, role, created_at FROM users ORDER BY id').all();
+}
+function setUserRole(id, role) {
+  if (role !== 'admin' && role !== 'member') return false;
+  return db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, Number(id)).changes > 0;
+}
+
+// ---------- 动态 ----------
+function createPost(userId, content) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(userId));
+  if (!user) throw new Error('用户不存在');
+  const ts = now();
+  const info = db.prepare('INSERT INTO posts(user_id, content, created_at) VALUES(?, ?, ?)')
+    .run(user.id, content, ts);
+  return { id: Number(info.lastInsertRowid), username: user.username, content, created_at: ts };
+}
+function listPosts() {
+  return db.prepare(`
+    SELECT p.id, p.content, p.created_at, u.username
+    FROM posts p JOIN users u ON u.id = p.user_id
+    ORDER BY p.id DESC LIMIT 200
+  `).all();
+}
+function deletePost(id, userId) {
+  return db.prepare('DELETE FROM posts WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
+}
+function deletePostAsAdmin(id) {
+  return db.prepare('DELETE FROM posts WHERE id = ?').run(Number(id)).changes > 0;
+}
+
+// ---------- 日志 ----------
+function createLog(title, content, cover_image, video_url, adminId) {
+  const ts = now();
+  const info = db.prepare(`
+    INSERT INTO logs(title, content, cover_image, video_url, admin_id, created_at, updated_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?)
+  `).run(title, content, cover_image, video_url, Number(adminId), ts, ts);
+  return getLog(Number(info.lastInsertRowid));
+}
+function listLogs() {
+  return db.prepare(`
+    SELECT l.id, l.title, l.cover_image, l.video_url, l.created_at, u.username AS admin_name
+    FROM logs l JOIN users u ON u.id = l.admin_id
+    ORDER BY l.id DESC
+  `).all();
+}
+function getLog(id) {
+  return db.prepare(`
+    SELECT l.*, u.username AS admin_name
+    FROM logs l JOIN users u ON u.id = l.admin_id
+    WHERE l.id = ?
+  `).get(Number(id)) || null;
+}
+function updateLog(id, patch) {
+  const cur = getLog(id);
+  if (!cur) return false;
+  const next = {
+    title: patch.title !== undefined ? patch.title : cur.title,
+    content: patch.content !== undefined ? patch.content : cur.content,
+    cover_image: patch.cover_image !== undefined ? patch.cover_image : cur.cover_image,
+    video_url: patch.video_url !== undefined ? patch.video_url : cur.video_url,
+  };
+  if (!next.title) return false;
+  db.prepare('UPDATE logs SET title = ?, content = ?, cover_image = ?, video_url = ?, updated_at = ? WHERE id = ?')
+    .run(next.title, next.content, next.cover_image, next.video_url, now(), Number(id));
+  return true;
+}
+function deleteLog(id) {
+  db.prepare('DELETE FROM comments WHERE log_id = ?').run(Number(id));
+  db.prepare('DELETE FROM danmaku WHERE log_id = ?').run(Number(id));
+  return db.prepare('DELETE FROM logs WHERE id = ?').run(Number(id)).changes > 0;
+}
+
+// ---------- 评论 ----------
+function addComment(logId, userId, content) {
+  const user = db.prepare('SELECT username FROM users WHERE id = ?').get(Number(userId));
+  const ts = now();
+  const info = db.prepare('INSERT INTO comments(log_id, user_id, content, created_at) VALUES(?, ?, ?, ?)')
+    .run(Number(logId), Number(userId), content, ts);
+  return { id: Number(info.lastInsertRowid), username: user ? user.username : '?', content, created_at: ts };
+}
+function listComments(logId) {
+  return db.prepare(`
+    SELECT c.id, c.content, c.created_at, u.username
+    FROM comments c JOIN users u ON u.id = c.user_id
+    WHERE c.log_id = ? ORDER BY c.id ASC
+  `).all(Number(logId));
+}
+
+// ---------- 弹幕 ----------
+function addDanmaku(logId, userId, content, videoTime) {
+  const user = db.prepare('SELECT username FROM users WHERE id = ?').get(Number(userId));
+  const t = Number(videoTime) || 0;
+  const info = db.prepare('INSERT INTO danmaku(log_id, user_id, content, video_time, created_at) VALUES(?, ?, ?, ?, ?)')
+    .run(Number(logId), Number(userId), content, t, now());
+  return { id: Number(info.lastInsertRowid), log_id: Number(logId), username: user ? user.username : '?', content, video_time: t };
+}
+function listDanmaku(logId) {
+  return db.prepare(`
+    SELECT d.id, d.log_id, d.content, d.video_time, u.username
+    FROM danmaku d JOIN users u ON u.id = d.user_id
+    WHERE d.log_id = ? ORDER BY d.video_time ASC, d.id ASC LIMIT 500
+  `).all(Number(logId));
+}
 
 module.exports = {
-  // ---------- 用户 ----------
-  createUser(username, hash) {
-    if (db.users.some((u) => u.username === username)) throw new Error('该用户名已被注册');
-    // 第一个注册的用户自动成为管理员
-    const role = db.users.length === 0 ? 'admin' : 'member';
-    const user = { id: db.seq.user++, username, hash, role, created_at: now() };
-    db.users.push(user);
-    save();
-    return { id: user.id, username: user.username, role: user.role };
-  },
-  findUser(username) {
-    return db.users.find((u) => u.username === username) || null;
-  },
-  listUsers() {
-    return db.users.map((u) => ({ id: u.id, username: u.username, role: u.role, created_at: u.created_at }));
-  },
-  setUserRole(id, role) {
-    if (role !== 'admin' && role !== 'member') return false;
-    const u = db.users.find((x) => x.id === Number(id));
-    if (!u) return false;
-    u.role = role;
-    save();
-    return true;
-  },
-
-  // ---------- 动态 ----------
-  createPost(userId, content) {
-    const user = db.users.find((u) => u.id === Number(userId));
-    if (!user) throw new Error('用户不存在');
-    const post = { id: db.seq.post++, user_id: user.id, username: user.username, content, created_at: now() };
-    db.posts.push(post);
-    save();
-    return { id: post.id, username: post.username, content: post.content, created_at: post.created_at };
-  },
-  listPosts() {
-    return db.posts
-      .slice()
-      .sort((a, b) => b.id - a.id)
-      .slice(0, 200)
-      .map((p) => ({ id: p.id, username: p.username, content: p.content, created_at: p.created_at }));
-  },
-  deletePost(id, userId) {
-    const i = db.posts.findIndex((p) => p.id === Number(id) && p.user_id === Number(userId));
-    if (i === -1) return false;
-    db.posts.splice(i, 1);
-    save();
-    return true;
-  },
-  deletePostAsAdmin(id) {
-    const i = db.posts.findIndex((p) => p.id === Number(id));
-    if (i === -1) return false;
-    db.posts.splice(i, 1);
-    save();
-    return true;
-  },
-
-  // ---------- 网站内容 ----------
-  getContent() {
-    const c = db.content || {};
-    return {
-      hero: Object.assign({}, DEFAULT_CONTENT.hero, c.hero || {}),
-      announcement: typeof c.announcement === 'string' ? c.announcement : DEFAULT_CONTENT.announcement,
-      about: typeof c.about === 'string' ? c.about : DEFAULT_CONTENT.about,
-    };
-  },
-  updateContent(patch) {
-    db.content = db.content || {};
-    if (patch.hero && typeof patch.hero === 'object') {
-      db.content.hero = Object.assign({}, db.content.hero || {}, patch.hero);
-    }
-    if (typeof patch.announcement === 'string') db.content.announcement = patch.announcement;
-    if (typeof patch.about === 'string') db.content.about = patch.about;
-    save();
-    return db.content;
-  },
+  createUser, findUser, listUsers, setUserRole,
+  createPost, listPosts, deletePost, deletePostAsAdmin,
+  getContent, updateContent,
+  createLog, listLogs, getLog, updateLog, deleteLog,
+  addComment, listComments,
+  addDanmaku, listDanmaku,
 };
