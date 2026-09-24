@@ -26,6 +26,12 @@
           <span class="post-time"><%= p.created_at %></span>
         </div>
         <p class="post-content"><%= p.content %></p>
+        <div class="post-actions">
+          <button class="link-btn like-btn<%= likesByPost[p.id].liked ? ' liked' : '' %>" data-id="<%= p.id %>" type="button">
+            <span class="like-icon"><%= likesByPost[p.id].liked ? '❤️' : '🤍' %></span>
+            <span class="like-count"><%= likesByPost[p.id].count %></span>
+          </button>
+        </div>
         <% if (user && (isAdmin || user.username === p.username)) { %>
           <button class="link-btn del" data-id="<%= p.id %>" type="button">删除</button>
         <% } %>
@@ -98,6 +104,12 @@
     return wrap;
   }
 
+  function likeBtnHtml(postId, count, liked) {
+    return '<button class="link-btn like-btn' + (liked ? ' liked' : '') + '" data-id="' + postId + '" type="button">' +
+      '<span class="like-icon">' + (liked ? '❤️' : '🤍') + '</span> ' +
+      '<span class="like-count">' + count + '</span></button>';
+  }
+
   function postEl(p) {
     const li = document.createElement('li');
     li.className = 'post';
@@ -106,7 +118,8 @@
       ? '<button class="link-btn del" data-id="' + p.id + '" type="button">删除</button>' : '';
     li.innerHTML =
       '<div class="post-meta"><span class="post-user"></span><span class="post-time">' + timeStr(p.created_at) + '</span></div>' +
-      '<p class="post-content"></p>' + del;
+      '<p class="post-content"></p>' +
+      '<div class="post-actions">' + likeBtnHtml(p.id, 0, false) + '</div>' + del;
     li.querySelector('.post-user').textContent = p.username;
     li.querySelector('.post-content').textContent = p.content;
     li.appendChild(commentsSection(p));
@@ -146,9 +159,24 @@
     el.remove();
     if (postId) bumpCount(postId, -1);
   });
+  socket.on('post:like:changed', (r) => {
+    const post = postsEl.querySelector('.post[data-id="' + r.post_id + '"]');
+    if (!post) return;
+    const btn = post.querySelector('.like-btn');
+    if (!btn) return;
+    btn.classList.toggle('liked', r.liked);
+    btn.querySelector('.like-icon').textContent = r.liked ? '❤️' : '🤍';
+    btn.querySelector('.like-count').textContent = r.like_count;
+  });
 
-  // 展开/收起评论、删除评论、删除动态
+  // 点赞、展开/收起评论、删除评论、删除动态
   document.addEventListener('click', (e) => {
+    const likeBtn = e.target.closest('.like-btn');
+    if (likeBtn) {
+      if (!currentUser) { window.location = '/login'; return; }
+      socket.emit('post:like', { postId: Number(likeBtn.dataset.id) });
+      return;
+    }
     const toggle = e.target.closest('.comment-toggle');
     if (toggle) {
       const body = toggle.parentElement.querySelector('.post-comments-body');
