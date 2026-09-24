@@ -108,7 +108,8 @@ function toBeijing(d) {
 }
 function now() { return toBeijing(new Date()); }
 
-// 一次性把旧库的 UTC ISO 时间戳（含 T）转成北京时间字符串，幂等（无 T 则跳过）
+// 一次性把旧库的 UTC ISO 时间戳（含 T）转成北京时间字符串，幂等（无 T 则跳过）。
+// 注意：post_likes 是复合主键（post_id, user_id），没有 id 列，且其 created_at 不对外展示，故不在此转换。
 function convertLegacyTimestamps() {
   const map = {
     users: ['created_at'],
@@ -118,7 +119,6 @@ function convertLegacyTimestamps() {
     notices: ['created_at'],
     logs: ['created_at', 'updated_at'],
     post_comments: ['created_at'],
-    post_likes: ['created_at'],
   };
   for (const table of Object.keys(map)) {
     for (const col of map[table]) {
