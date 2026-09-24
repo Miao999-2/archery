@@ -1,0 +1,34 @@
+<% pageTitle = siteName + ' · 设置'; %>
+<%- include('partials/head') %>
+<section class="page settings">
+  <h1>个人设置</h1>
+  <% if (ok) { %><p class="ok">已保存 ✓</p><% } %>
+  <% if (err) { %><p class="error"><%= err %></p><% } %>
+
+  <section class="settings-card">
+    <h2>头像</h2>
+    <div class="avatar-row">
+      <% if (u && u.avatar) { %>
+        <img class="avatar-lg" src="<%= u.avatar %>" alt="当前头像">
+      <% } else { %>
+        <span class="avatar-lg avatar-placeholder">🏹</span>
+      <% } %>
+      <form method="post" action="/settings/avatar" enctype="multipart/form-data" class="avatar-form">
+        <label>从本地选择图片（PNG / JPG / GIF / WebP，≤2MB）
+          <input type="file" name="avatar" accept="image/*" required>
+        </label>
+        <button class="btn small" type="submit">上传头像</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="settings-card">
+    <h2>昵称</h2>
+    <p class="muted">用户名用于登录，不能修改。昵称对外展示，留空则展示用户名。</p>
+    <form method="post" action="/settings" class="form">
+      <label>昵称（30 字以内）<input name="nickname" maxlength="30" value="<%= u ? u.nickname : '' %>" placeholder="例如：青木澄"></label>
+      <button class="btn" type="submit">保存昵称</button>
+    </form>
+  </section>
+</section>
+<%- include('partials/foot') %>
