@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS post_comments (
   content TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (post_id, user_id)
+);
 `);
 
 function now() { return new Date().toISOString(); }
@@ -145,12 +151,18 @@ function listPosts() {
 }
 function deletePost(id, userId) {
   const ok = db.prepare('DELETE FROM posts WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
-  if (ok) db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+  if (ok) {
+    db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+    db.prepare('DELETE FROM post_likes WHERE post_id = ?').run(Number(id));
+  }
   return ok;
 }
 function deletePostAsAdmin(id) {
   const ok = db.prepare('DELETE FROM posts WHERE id = ?').run(Number(id)).changes > 0;
-  if (ok) db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+  if (ok) {
+    db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+    db.prepare('DELETE FROM post_likes WHERE post_id = ?').run(Number(id));
+  }
   return ok;
 }
 
@@ -274,6 +286,34 @@ function deletePostComment(id, userId, isAdmin) {
   return db.prepare('DELETE FROM post_comments WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
 }
 
+// ---------- 动态点赞 ----------
+function toggleLike(postId, userId) {
+  const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(Number(postId));
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(userId));
+  if (!post || !user) return null;
+  const existing = db.prepare('SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?').get(Number(postId), Number(userId));
+  if (existing) {
+    db.prepare('DELETE FROM post_likes WHERE post_id = ? AND user_id = ?').run(Number(postId), Number(userId));
+  } else {
+    db.prepare('INSERT INTO post_likes(post_id, user_id, created_at) VALUES(?, ?, ?)').run(Number(postId), Number(userId), now());
+  }
+  const count = db.prepare('SELECT COUNT(*) AS c FROM post_likes WHERE post_id = ?').get(Number(postId)).c;
+  return { post_id: Number(postId), like_count: count, liked: !existing };
+}
+function getLikeInfoByPosts(ids, userId) {
+  const map = {};
+  if (!ids || !ids.length) return map;
+  for (const id of ids) map[id] = { count: 0, liked: false };
+  const ph = ids.map(() => '?').join(',');
+  const counts = db.prepare(`SELECT post_id, COUNT(*) AS c FROM post_likes WHERE post_id IN (${ph}) GROUP BY post_id`).all(...ids.map(Number));
+  for (const r of counts) if (map[r.post_id]) map[r.post_id].count = r.c;
+  if (userId) {
+    const likedRows = db.prepare(`SELECT post_id FROM post_likes WHERE user_id = ? AND post_id IN (${ph})`).all(Number(userId), ...ids.map(Number));
+    for (const r of likedRows) if (map[r.post_id]) map[r.post_id].liked = true;
+  }
+  return map;
+}
+
 module.exports = {
   createUser, findUser, listUsers, setUserRole,
   createPost, listPosts, deletePost, deletePostAsAdmin,
@@ -283,5 +323,6 @@ module.exports = {
   addDanmaku, listDanmaku,
   createNotice, listNotices, deleteNotice,
   addPostComment, listPostCommentsByPosts, deletePostComment,
+  toggleLike, getLikeInfoByPosts,
   checkpoint,
 };
