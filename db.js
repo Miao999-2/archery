@@ -379,6 +379,10 @@ function listNotices() {
 function getNotice(id) {
   return db.prepare('SELECT * FROM notices WHERE id = ?').get(Number(id)) || null;
 }
+function updateNotice(id, title, content) {
+  return db.prepare('UPDATE notices SET title = ?, content = ? WHERE id = ?')
+    .run(String(title), String(content || ''), Number(id)).changes > 0;
+}
 function setNoticePinned(id, pinned) {
   return db.prepare('UPDATE notices SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, Number(id)).changes > 0;
 }
@@ -498,7 +502,7 @@ module.exports = {
   createLog, listLogs, getLog, updateLog, deleteLog,
   addComment, listComments,
   addDanmaku, listDanmaku,
-  createNotice, listNotices, getNotice, setNoticePinned, deleteNotice,
+  createNotice, listNotices, getNotice, updateNotice, setNoticePinned, deleteNotice,
   addPostComment, listPostCommentsByPosts, deletePostComment,
   toggleLike, getLikeInfoByPosts,
   getSession, setSession, destroySession, touchSession, cleanupSessions,
