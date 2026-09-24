@@ -35,15 +35,25 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 io.engine.use(sessionMiddleware);
 
-// 把当前用户（含角色）注入所有模板，并保持角色最新
+// 把当前用户（含昵称/头像/状态）注入所有模板，并保持角色最新
 app.use((req, res, next) => {
   res.locals.siteName = SITE_NAME;
   let user = null;
   if (req.session.user) {
     const fresh = db.findUser(req.session.user.username);
-    if (fresh) {
-      user = { id: fresh.id, username: fresh.username, role: fresh.role };
+    if (fresh && fresh.status === 'approved') {
+      user = {
+        id: fresh.id,
+        username: fresh.username,
+        role: fresh.role,
+        nickname: fresh.nickname,
+        avatar: fresh.avatar,
+        status: fresh.status,
+        display_name: fresh.nickname || fresh.username,
+      };
       req.session.user = user;
+    } else {
+      req.session.user = null; // 待审批 / 被拒 的账号视为未登录
     }
   }
   res.locals.user = user;
@@ -86,6 +96,14 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|mp4)$/i.test(file.originalname || '')),
 });
 
+// 头像上传（存入内存，转 base64 存入数据库，随备份一起持久化，不落磁盘）
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|gif|webp)$/i.test(file.originalname || '')),
+});
+const AVATAR_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
 app.get('/about', (req, res) => res.render('about', { content: db.getContent() }));
@@ -99,30 +117,52 @@ app.get('/board', (req, res) => {
   });
 });
 
-app.get('/login', (req, res) => res.render('login', { error: null }));
+app.get('/login', (req, res) => {
+  const msg = req.query.msg === 'pending' ? '注册申请已提交，请等待管理员审批通过后再登录。' : '';
+  res.render('login', { error: null, msg });
+});
 app.post('/login', (req, res) => {
   const { username, password } = req.body || {};
   const user = username && db.findUser(String(username).trim());
   if (!user || !verifyPassword(String(password || ''), user.hash)) {
-    return res.status(401).render('login', { error: '用户名或密码错误' });
+    return res.status(401).render('login', { error: '用户名或密码错误', msg: '' });
   }
-  req.session.user = { id: user.id, username: user.username, role: user.role };
+  if (user.status === 'pending') {
+    return res.status(403).render('login', { error: '账号正在等待管理员审批，暂时无法登录。', msg: '' });
+  }
+  if (user.status === 'rejected') {
+    return res.status(403).render('login', { error: '该账号的注册申请未通过，无法登录。', msg: '' });
+  }
+  req.session.user = {
+    id: user.id, username: user.username, role: user.role,
+    nickname: user.nickname, avatar: user.avatar, status: user.status,
+    display_name: user.nickname || user.username,
+  };
   res.redirect('/board');
 });
 
 app.get('/register', (req, res) => res.render('register', { error: null }));
 app.post('/register', (req, res) => {
-  const { username, password, email } = req.body || {};
+  const { username, password, email, reason } = req.body || {};
   const u = String(username || '').trim();
   const p = String(password || '');
   const em = String(email || '').trim();
+  const rsn = String(reason || '').trim();
   if (u.length < 2) return res.status(400).render('register', { error: '用户名至少 2 个字符' });
   if (p.length < 6) return res.status(400).render('register', { error: '密码至少 6 位' });
+  if (!rsn) return res.status(400).render('register', { error: '请填写申请理由' });
+  if (rsn.length > 200) return res.status(400).render('register', { error: '申请理由不超过 200 字' });
   if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return res.status(400).render('register', { error: '邮箱格式不正确' });
   try {
-    const user = db.createUser(u, hashPassword(p), em);
-    req.session.user = { id: user.id, username: user.username, role: user.role };
-    res.redirect('/board');
+    const user = db.createUser(u, hashPassword(p), em, rsn);
+    if (user.status === 'approved') {
+      req.session.user = {
+        id: user.id, username: user.username, role: user.role,
+        nickname: '', avatar: '', status: 'approved', display_name: user.username,
+      };
+      return res.redirect('/board');
+    }
+    res.redirect('/login?msg=pending');
   } catch (e) {
     res.status(400).render('register', { error: e.message || '注册失败' });
   }
@@ -132,11 +172,44 @@ app.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
 
+// ---------- 个人主页 / 设置 ----------
+app.get('/u/:username', (req, res) => {
+  const profile = db.getPublicProfile(req.params.username);
+  if (!profile) return res.status(404).send('用户不存在。<a href="/">返回首页</a>');
+  const posts = db.listPostsByUser(profile.id);
+  res.render('profile', { profile, posts });
+});
+
+app.get('/settings', requireLogin, (req, res) => {
+  const fresh = db.getUserById(req.session.user.id);
+  res.render('settings', {
+    u: fresh,
+    ok: req.query.ok,
+    err: req.query.err === 'avatar' ? '头像上传失败：仅支持 PNG / JPG / JPEG / GIF / WebP（≤2MB）' : (req.query.err === 'nickname' ? '昵称不超过 30 个字符' : null),
+  });
+});
+app.post('/settings', requireLogin, (req, res) => {
+  const nickname = String((req.body && req.body.nickname) || '').trim();
+  if (nickname.length > 30) return res.redirect('/settings?err=nickname');
+  db.updateProfile(req.session.user.id, nickname);
+  res.redirect('/settings?ok=1');
+});
+app.post('/settings/avatar', requireLogin, avatarUpload.single('avatar'), (req, res) => {
+  if (!req.file) return res.redirect('/settings?err=avatar');
+  const ext = (path.extname(req.file.originalname) || '').toLowerCase();
+  const mime = AVATAR_MIME[ext] || 'image/png';
+  const dataUrl = `data:${mime};base64,${req.file.buffer.toString('base64')}`;
+  db.updateUserAvatar(req.session.user.id, dataUrl);
+  res.redirect('/settings?ok=1');
+});
+
 // ---------- 管理员工作台 ----------
 app.get('/admin', requireAdmin, (req, res) => {
   res.render('admin', {
     content: db.getContent(),
     users: db.listUsers(),
+    pendingUsers: db.listUsersByStatus('pending'),
+    rejectedUsers: db.listUsersByStatus('rejected'),
     posts: db.listPosts(),
     logs: db.listLogs(),
     ok: !!req.query.ok,
@@ -164,6 +237,26 @@ app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
 });
 app.post('/admin/posts/:id/delete', requireAdmin, (req, res) => {
   db.deletePostAsAdmin(req.params.id);
+  res.redirect('/admin');
+});
+app.post('/admin/users/:id/approve', requireAdmin, (req, res) => {
+  db.setUserStatus(Number(req.params.id), 'approved');
+  res.redirect('/admin');
+});
+app.post('/admin/users/:id/reject', requireAdmin, (req, res) => {
+  db.setUserStatus(Number(req.params.id), 'rejected');
+  res.redirect('/admin');
+});
+app.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (id === Number(req.session.user.id)) return res.redirect('/admin'); // 不能删自己
+  const target = db.getUserById(id);
+  if (!target) return res.redirect('/admin');
+  if (target.role === 'admin') {
+    const admins = db.listUsers().filter((u) => u.role === 'admin');
+    if (admins.length <= 1) return res.redirect('/admin'); // 不能删除最后一个管理员
+  }
+  db.deleteUser(id);
   res.redirect('/admin');
 });
 
