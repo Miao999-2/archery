@@ -244,13 +244,15 @@ app.get('/settings', requireLogin, (req, res) => {
   res.render('settings', {
     u: fresh,
     ok: req.query.ok,
-    err: req.query.err === 'avatar' ? '头像上传失败：请上传 PNG / JPG / JPEG / GIF 图片（系统会自动压缩过大图片）' : (req.query.err === 'nickname' ? '昵称不超过 30 个字符' : null),
+    err: req.query.err === 'avatar' ? '头像上传失败：请上传 PNG / JPG / JPEG / GIF 图片（系统会自动压缩过大图片）' : (req.query.err === 'nickname' ? '昵称不超过 30 个字符' : (req.query.err === 'bio' ? '个人简介不超过 200 个字符' : null)),
   });
 });
 app.post('/settings', requireLogin, (req, res) => {
   const nickname = String((req.body && req.body.nickname) || '').trim();
+  const bio = String((req.body && req.body.bio) || '').trim();
   if (nickname.length > 30) return res.redirect('/settings?err=nickname');
-  db.updateProfile(req.session.user.id, nickname);
+  if (bio.length > 200) return res.redirect('/settings?err=bio');
+  db.updateProfile(req.session.user.id, nickname, bio);
   res.redirect('/settings?ok=1');
 });
 app.post('/settings/avatar', requireLogin, (req, res) => {
