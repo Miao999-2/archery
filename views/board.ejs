@@ -40,9 +40,13 @@
           <div class="post-comments-body" hidden>
             <ul class="post-comment-list">
               <% cList.forEach(c => { %>
-                <li class="post-comment" data-cid="<%= c.id %>">
+                <li class="post-comment<%= c.parent_id ? ' is-reply' : '' %>" data-cid="<%= c.id %>">
                   <span class="post-comment-user"><%= c.username %>：</span>
+                  <% if (c.reply_to) { %><span class="post-comment-replyto">回复 @<%= c.reply_to %>：</span><% } %>
                   <span class="post-comment-body"><%= c.content %></span>
+                  <% if (user) { %>
+                    <button class="link-btn reply-btn" data-cid="<%= c.id %>" data-user="<%= c.username %>" type="button">回复</button>
+                  <% } %>
                   <% if (user && (isAdmin || user.username === c.username)) { %>
                     <button class="link-btn del-comment" data-cid="<%= c.id %>" type="button">删除</button>
                   <% } %>
@@ -79,15 +83,24 @@
 
   function commentItem(c) {
     const li = document.createElement('li');
-    li.className = 'post-comment';
+    li.className = 'post-comment' + (c.parent_id ? ' is-reply' : '');
     li.dataset.cid = c.id;
     const canDel = currentUser && (currentIsAdmin || currentUser === c.username);
     li.innerHTML =
       '<span class="post-comment-user"></span>' +
+      (c.reply_to ? '<span class="post-comment-replyto"></span>' : '') +
       '<span class="post-comment-body"></span>' +
-      (canDel ? '<button class="link-btn del-comment" data-cid="' + c.id + '" type="button">删除</button>' : '');
+      (currentUser ? '<button class="link-btn reply-btn" type="button">回复</button>' : '') +
+      (canDel ? '<button class="link-btn del-comment" type="button">删除</button>' : '');
     li.querySelector('.post-comment-user').textContent = c.username + '：';
+    if (c.reply_to) li.querySelector('.post-comment-replyto').textContent = '回复 @' + c.reply_to + '：';
     li.querySelector('.post-comment-body').textContent = c.content;
+    if (currentUser) {
+      const rb = li.querySelector('.reply-btn');
+      rb.dataset.cid = c.id;
+      rb.dataset.user = c.username;
+    }
+    if (canDel) li.querySelector('.del-comment').dataset.cid = c.id;
     return li;
   }
 
@@ -188,11 +201,35 @@
       socket.emit('post:comment:delete', { id: delComment.dataset.cid });
       return;
     }
+    const replyBtn = e.target.closest('.reply-btn');
+    if (replyBtn) {
+      if (!currentUser) { window.location = '/login'; return; }
+      const li = replyBtn.closest('.post-comment');
+      if (!li) return;
+      const existing = li.querySelector('.reply-inline');
+      if (existing) { existing.remove(); return; } // 再点一次收起
+      const form = document.createElement('form');
+      form.className = 'comment-inline reply-inline';
+      form.dataset.parent = replyBtn.dataset.cid;
+      const rinput = document.createElement('input');
+      rinput.maxLength = 200;
+      rinput.required = true;
+      rinput.placeholder = '回复 @' + replyBtn.dataset.user; // 用属性赋值，避免用户名注入 HTML
+      const rbtn = document.createElement('button');
+      rbtn.className = 'btn small';
+      rbtn.type = 'submit';
+      rbtn.textContent = '回复';
+      form.appendChild(rinput);
+      form.appendChild(rbtn);
+      li.appendChild(form);
+      rinput.focus();
+      return;
+    }
     const btn = e.target.closest('.del');
     if (btn) socket.emit('post:delete', { id: btn.dataset.id });
   });
 
-  // 提交评论
+  // 提交评论 / 回复
   document.addEventListener('submit', (e) => {
     const form = e.target.closest('.comment-inline');
     if (!form) return;
@@ -200,8 +237,18 @@
     const input = form.querySelector('input');
     const content = input.value.trim();
     if (!content) return;
-    socket.emit('post:comment:send', { postId: Number(form.dataset.post), content: content });
-    input.value = '';
+    if (form.classList.contains('reply-inline')) {
+      const post = form.closest('.post');
+      socket.emit('post:comment:send', {
+        postId: Number(post ? post.dataset.id : form.dataset.post),
+        content: content,
+        parentId: Number(form.dataset.parent),
+      });
+      form.remove();
+    } else {
+      socket.emit('post:comment:send', { postId: Number(form.dataset.post), content: content });
+      input.value = '';
+    }
   });
 
   // 发布动态
