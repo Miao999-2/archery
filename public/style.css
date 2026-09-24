@@ -166,3 +166,10 @@ a:hover { color: var(--gold-dk); }
 .post-comment .del-comment { font-size: 12px; margin-left: 6px; }
 .comment-inline { display: flex; gap: 8px; margin-top: 8px; }
 .comment-inline input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 14px; }
+
+/* ---------- 动态墙点赞 ---------- */
+.post-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.like-btn { text-decoration: none; font-size: 14px; }
+.like-btn:hover { color: #e0245e; }
+.like-btn.liked { color: #e0245e; }
+.like-btn .like-icon { margin-right: 2px; }
