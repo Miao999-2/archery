@@ -414,6 +414,21 @@ app.post('/notices/:id/pin', requireAdmin, (req, res) => {
   if (n) db.setNoticePinned(req.params.id, n.pinned ? 0 : 1);
   res.redirect('/notices');
 });
+app.get('/notices/:id/edit', requireAdmin, (req, res) => {
+  const n = db.getNotice(req.params.id);
+  if (!n) return res.status(404).send('通知不存在。<a href="/notices">返回通知</a>');
+  res.render('notice-edit', { n, error: null });
+});
+app.post('/notices/:id/edit', requireAdmin, (req, res) => {
+  const n = db.getNotice(req.params.id);
+  if (!n) return res.status(404).send('通知不存在。<a href="/notices">返回通知</a>');
+  const b = req.body || {};
+  const title = String(b.title || '').trim();
+  const content = String(b.content || '').trim();
+  if (!title) return res.render('notice-edit', { n, error: '标题不能为空' });
+  db.updateNotice(req.params.id, title, content);
+  res.redirect('/notices');
+});
 app.post('/notices/:id/delete', requireAdmin, (req, res) => {
   db.deleteNotice(req.params.id);
   res.redirect('/notices');
