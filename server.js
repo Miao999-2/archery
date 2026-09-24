@@ -166,7 +166,7 @@ const compressPostImage = (buffer) => compressImage(buffer, POST_IMAGE_MAX_DIM);
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
 app.get('/about', (req, res) => res.render('about', { content: db.getContent() }));
-app.get('/board', (req, res) => {
+app.get('/board', requireLogin, (req, res) => {
   const posts = db.listPosts();
   const userId = req.session.user ? req.session.user.id : null;
   res.render('board', {
@@ -355,7 +355,7 @@ app.post('/api/upload', requireAdmin, upload.single('file'), (req, res) => {
 });
 
 // ---------- 日志 ----------
-app.get('/logs', (req, res) => res.render('logs', { logs: db.listLogs() }));
+app.get('/logs', requireLogin, (req, res) => res.render('logs', { logs: db.listLogs() }));
 app.get('/logs/new', requireAdmin, (req, res) => res.render('log-edit', { log: null, error: null }));
 app.post('/logs', requireAdmin, (req, res) => {
   const b = req.body || {};
@@ -369,7 +369,7 @@ app.post('/logs', requireAdmin, (req, res) => {
   const log = db.createLog(title, String(b.content || ''), String(b.cover_image || ''), String(b.video_url || ''), req.session.user.id);
   res.redirect('/logs/' + log.id);
 });
-app.get('/logs/:id', (req, res) => {
+app.get('/logs/:id', requireLogin, (req, res) => {
   const log = db.getLog(req.params.id);
   if (!log) return res.status(404).send('日志不存在。<a href="/logs">返回日志列表</a>');
   res.render('log-detail', { log, comments: db.listComments(log.id), danmaku: db.listDanmaku(log.id) });
