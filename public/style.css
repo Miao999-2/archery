@@ -173,3 +173,9 @@ a:hover { color: var(--gold-dk); }
 .like-btn:hover { color: #e0245e; }
 .like-btn.liked { color: #e0245e; }
 .like-btn .like-icon { margin-right: 2px; }
+
+/* ---------- 动态墙评论回复 ---------- */
+.post-comment.is-reply { margin-left: 20px; padding-left: 10px; border-left: 2px solid #eee7d8; }
+.post-comment-replyto { color: var(--gold-dk); font-size: 13px; margin-right: 2px; }
+.reply-btn { font-size: 12px; margin-left: 8px; }
+.reply-inline { margin-left: 20px; margin-top: 8px; }
