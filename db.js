@@ -198,7 +198,7 @@ function getPublicProfile(username) {
   return u;
 }
 function listUsers() {
-  return db.prepare('SELECT id, username, nickname, avatar, status, email, role, created_at FROM users ORDER BY id').all();
+  return db.prepare('SELECT id, username, nickname, avatar, status, email, role, created_at FROM users WHERE status = ? ORDER BY id').all('approved');
 }
 function listUsersByStatus(status) {
   return db.prepare('SELECT id, username, nickname, email, reason, created_at FROM users WHERE status = ? ORDER BY id').all(status);
