@@ -20,7 +20,6 @@
         <% if (user.avatar) { %><img class="avatar-sm" src="<%= user.avatar %>" alt=""><% } else { %><span class="avatar-sm avatar-placeholder">🏹</span><% } %>
         <span class="who"><%= user.display_name %><% if (isAdmin) { %> · 管理员<% } %></span>
       </a>
-      <a href="/settings">设置</a>
       <% if (isAdmin) { %><a href="/admin">工作台</a><% } %>
       <form method="post" action="/logout" class="inline"><button class="link-btn" type="submit">退出</button></form>
     <% } else { %>
