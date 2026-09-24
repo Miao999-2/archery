@@ -25,16 +25,22 @@
   <% } else { %>
     <ul class="posts">
       <% notices.forEach(n => { %>
-        <li class="post notice-item">
+        <li class="post notice-item<%= n.pinned ? ' pinned' : '' %>">
           <div class="post-meta">
+            <% if (n.pinned) { %><span class="badge pinned">📌 置顶</span><% } %>
             <span class="post-user"><%= n.title %></span>
             <span class="post-time"><a href="/u/<%= n.username %>"><%= n.display_name %></a> · <%= n.created_at %></span>
           </div>
           <p class="post-content"><%= n.content %></p>
           <% if (isAdmin) { %>
-            <form method="post" action="/notices/<%= n.id %>/delete" class="inline" onsubmit="return confirm('确定删除这条通知？')">
-              <button class="link-btn del" type="submit">删除</button>
-            </form>
+            <div class="post-actions">
+              <form method="post" action="/notices/<%= n.id %>/pin" class="inline">
+                <button class="link-btn" type="submit"><%= n.pinned ? '取消置顶' : '置顶' %></button>
+              </form>
+              <form method="post" action="/notices/<%= n.id %>/delete" class="inline" onsubmit="return confirm('确定删除这条通知？')">
+                <button class="link-btn" type="submit">删除</button>
+              </form>
+            </div>
           <% } %>
         </li>
       <% }) %>
