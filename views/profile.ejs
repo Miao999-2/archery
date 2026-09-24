@@ -1,0 +1,36 @@
+<% pageTitle = siteName + ' · ' + profile.display_name; %>
+<%- include('partials/head') %>
+<section class="page profile">
+  <div class="profile-head">
+    <% if (profile.avatar) { %>
+      <img class="avatar-lg" src="<%= profile.avatar %>" alt="<%= profile.display_name %>">
+    <% } else { %>
+      <span class="avatar-lg avatar-placeholder">🏹</span>
+    <% } %>
+    <div class="profile-info">
+      <h1><%= profile.display_name %></h1>
+      <p class="muted">@<%= profile.username %> · <%= profile.role === 'admin' ? '管理员' : '成员' %> · 加入于 <%= profile.created_at %></p>
+      <% if (user && user.username === profile.username) { %>
+        <p><a class="btn small" href="/settings">编辑个人资料</a></p>
+      <% } %>
+    </div>
+  </div>
+
+  <h2>TA 的动态（<%= posts.length %>）</h2>
+  <% if (!posts.length) { %>
+    <p class="empty">还没有发布过动态。</p>
+  <% } else { %>
+    <ul class="posts">
+      <% posts.forEach(p => { %>
+        <li class="post">
+          <div class="post-meta">
+            <span class="post-user"><%= p.display_name %></span>
+            <span class="post-time"><%= p.created_at %></span>
+          </div>
+          <p class="post-content"><%= p.content %></p>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('partials/foot') %>
