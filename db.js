@@ -282,7 +282,7 @@ function createLog(title, content, cover_image, video_url, adminId) {
 }
 function listLogs() {
   return db.prepare(`
-    SELECT l.id, l.title, l.cover_image, l.video_url, l.created_at, u.avatar,
+    SELECT l.id, l.title, l.cover_image, l.video_url, l.created_at, u.avatar, u.username,
            COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM logs l JOIN users u ON u.id = l.admin_id
     ORDER BY l.id DESC
@@ -290,7 +290,7 @@ function listLogs() {
 }
 function getLog(id) {
   return db.prepare(`
-    SELECT l.*, u.avatar, COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
+    SELECT l.*, u.avatar, u.username, COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM logs l JOIN users u ON u.id = l.admin_id
     WHERE l.id = ?
   `).get(Number(id)) || null;
@@ -357,7 +357,7 @@ function createNotice(adminId, title, content) {
 }
 function listNotices() {
   return db.prepare(`
-    SELECT n.id, n.title, n.content, n.created_at, u.avatar,
+    SELECT n.id, n.title, n.content, n.created_at, u.avatar, u.username,
            COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM notices n JOIN users u ON u.id = n.admin_id
     ORDER BY n.id DESC
