@@ -34,6 +34,7 @@
           <p class="post-content"><%= n.content %></p>
           <% if (isAdmin) { %>
             <div class="post-actions">
+              <a class="link-btn" href="/notices/<%= n.id %>/edit">编辑</a>
               <form method="post" action="/notices/<%= n.id %>/pin" class="inline">
                 <button class="link-btn" type="submit"><%= n.pinned ? '取消置顶' : '置顶' %></button>
               </form>
