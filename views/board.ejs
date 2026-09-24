@@ -2,7 +2,7 @@
 <%- include('partials/head') %>
 <section class="page">
   <h1>动态墙</h1>
-  <p class="muted">多人实时互动：所有人发布的内容都会即时显示。打开两个浏览器窗口试试。</p>
+  <p class="muted">多人实时互动：所有人的内容即时显示，人人可评论。打开两个浏览器窗口试试。</p>
 
   <% if (user) { %>
     <form id="post-form" class="post-form">
@@ -11,7 +11,7 @@
     </form>
   <% } else { %>
     <div class="notice">
-      <p>登录后即可发布内容、参与互动。</p>
+      <p>登录后即可发布内容、参与评论。</p>
       <a class="btn" href="/login">去登录</a>
       <a class="btn ghost" href="/register">注册账号</a>
     </div>
@@ -19,6 +19,7 @@
 
   <ul id="posts" class="posts">
     <% posts.forEach(p => { %>
+      <% const cList = commentsByPost[p.id] || []; %>
       <li class="post" data-id="<%= p.id %>">
         <div class="post-meta">
           <span class="post-user"><%= p.username %></span>
@@ -28,6 +29,28 @@
         <% if (user && (isAdmin || user.username === p.username)) { %>
           <button class="link-btn del" data-id="<%= p.id %>" type="button">删除</button>
         <% } %>
+        <div class="post-comments" data-post="<%= p.id %>">
+          <button class="link-btn comment-toggle" type="button">评论 <span class="comment-count"><%= cList.length %></span></button>
+          <div class="post-comments-body" hidden>
+            <ul class="post-comment-list">
+              <% cList.forEach(c => { %>
+                <li class="post-comment" data-cid="<%= c.id %>">
+                  <span class="post-comment-user"><%= c.username %>：</span>
+                  <span class="post-comment-body"><%= c.content %></span>
+                  <% if (user && (isAdmin || user.username === c.username)) { %>
+                    <button class="link-btn del-comment" data-cid="<%= c.id %>" type="button">删除</button>
+                  <% } %>
+                </li>
+              <% }) %>
+            </ul>
+            <% if (user) { %>
+              <form class="comment-inline" data-post="<%= p.id %>">
+                <input maxlength="200" placeholder="写评论……" required>
+                <button class="btn small" type="submit">发送</button>
+              </form>
+            <% } %>
+          </div>
+        </div>
       </li>
     <% }) %>
     <% if (!posts.length) { %>
@@ -47,6 +70,34 @@
     try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); }
     catch (e) { return iso; }
   }
+
+  function commentItem(c) {
+    const li = document.createElement('li');
+    li.className = 'post-comment';
+    li.dataset.cid = c.id;
+    const canDel = currentUser && (currentIsAdmin || currentUser === c.username);
+    li.innerHTML =
+      '<span class="post-comment-user"></span>' +
+      '<span class="post-comment-body"></span>' +
+      (canDel ? '<button class="link-btn del-comment" data-cid="' + c.id + '" type="button">删除</button>' : '');
+    li.querySelector('.post-comment-user').textContent = c.username + '：';
+    li.querySelector('.post-comment-body').textContent = c.content;
+    return li;
+  }
+
+  function commentsSection(p) {
+    const wrap = document.createElement('div');
+    wrap.className = 'post-comments';
+    wrap.dataset.post = p.id;
+    wrap.innerHTML =
+      '<button class="link-btn comment-toggle" type="button">评论 <span class="comment-count">0</span></button>' +
+      '<div class="post-comments-body" hidden>' +
+        '<ul class="post-comment-list"></ul>' +
+        (currentUser ? '<form class="comment-inline" data-post="' + p.id + '"><input maxlength="200" placeholder="写评论……" required><button class="btn small" type="submit">发送</button></form>' : '') +
+      '</div>';
+    return wrap;
+  }
+
   function postEl(p) {
     const li = document.createElement('li');
     li.className = 'post';
@@ -58,7 +109,15 @@
       '<p class="post-content"></p>' + del;
     li.querySelector('.post-user').textContent = p.username;
     li.querySelector('.post-content').textContent = p.content;
+    li.appendChild(commentsSection(p));
     return li;
+  }
+
+  function bumpCount(postId, delta) {
+    const post = postsEl.querySelector('.post[data-id="' + postId + '"]');
+    if (!post) return;
+    const count = post.querySelector('.comment-count');
+    if (count) count.textContent = Math.max(0, Number(count.textContent) + delta);
   }
 
   socket.on('post:new', (p) => {
@@ -70,7 +129,54 @@
     const el = postsEl.querySelector('.post[data-id="' + data.id + '"]');
     if (el) el.remove();
   });
+  socket.on('post:comment:new', (c) => {
+    const post = postsEl.querySelector('.post[data-id="' + c.post_id + '"]');
+    const list = post && post.querySelector('.post-comment-list');
+    const body = post && post.querySelector('.post-comments-body');
+    if (!list) return;
+    list.appendChild(commentItem(c));
+    bumpCount(c.post_id, 1);
+    if (body) body.hidden = false;
+  });
+  socket.on('post:comment:deleted', (data) => {
+    const el = postsEl.querySelector('.post-comment[data-cid="' + data.id + '"]');
+    if (!el) return;
+    const post = el.closest('.post');
+    const postId = post ? post.dataset.id : null;
+    el.remove();
+    if (postId) bumpCount(postId, -1);
+  });
 
+  // 展开/收起评论、删除评论、删除动态
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.comment-toggle');
+    if (toggle) {
+      const body = toggle.parentElement.querySelector('.post-comments-body');
+      if (body) body.hidden = !body.hidden;
+      return;
+    }
+    const delComment = e.target.closest('.del-comment');
+    if (delComment) {
+      socket.emit('post:comment:delete', { id: delComment.dataset.cid });
+      return;
+    }
+    const btn = e.target.closest('.del');
+    if (btn) socket.emit('post:delete', { id: btn.dataset.id });
+  });
+
+  // 提交评论
+  document.addEventListener('submit', (e) => {
+    const form = e.target.closest('.comment-inline');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const content = input.value.trim();
+    if (!content) return;
+    socket.emit('post:comment:send', { postId: Number(form.dataset.post), content: content });
+    input.value = '';
+  });
+
+  // 发布动态
   const form = document.getElementById('post-form');
   if (form) {
     form.addEventListener('submit', (e) => {
@@ -82,10 +188,5 @@
       input.value = '';
     });
   }
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.del');
-    if (!btn) return;
-    socket.emit('post:delete', { id: btn.dataset.id });
-  });
 </script>
 <%- include('partials/foot') %>
