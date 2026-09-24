@@ -1,13 +1,17 @@
 const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
 const express = require('express');
 const session = require('express-session');
+const multer = require('multer');
 const { Server } = require('socket.io');
 const db = require('./db');
 
 const SITE_NAME = '射箭队';
 const PORT = process.env.PORT || 3000;
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 const server = http.createServer(app);
@@ -16,6 +20,7 @@ const io = new Server(server);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(UPLOAD_DIR));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
@@ -45,7 +50,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 密码哈希（Node 内置，无需第三方依赖）
+// 密码哈希（Node 内置 scrypt，无需第三方依赖）
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(pw, salt, 64).toString('hex');
@@ -62,6 +67,23 @@ function requireAdmin(req, res, next) {
   if (!fresh || fresh.role !== 'admin') return res.status(403).send('无权限访问（需要管理员权限）。<a href="/">返回首页</a>');
   next();
 }
+function requireLogin(req, res, next) {
+  if (!req.session.user) return res.redirect('/login');
+  next();
+}
+
+// 文件上传（图片 PNG/JPG/JPEG、视频 MP4）
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = (path.extname(file.originalname) || '').toLowerCase();
+      cb(null, Date.now() + '-' + Math.round(Math.random() * 1e9) + ext);
+    },
+  }),
+  limits: { fileSize: 150 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|mp4)$/i.test(file.originalname || '')),
+});
 
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
@@ -81,13 +103,15 @@ app.post('/login', (req, res) => {
 
 app.get('/register', (req, res) => res.render('register', { error: null }));
 app.post('/register', (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, email } = req.body || {};
   const u = String(username || '').trim();
   const p = String(password || '');
+  const em = String(email || '').trim();
   if (u.length < 2) return res.status(400).render('register', { error: '用户名至少 2 个字符' });
   if (p.length < 6) return res.status(400).render('register', { error: '密码至少 6 位' });
+  if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return res.status(400).render('register', { error: '邮箱格式不正确' });
   try {
-    const user = db.createUser(u, hashPassword(p));
+    const user = db.createUser(u, hashPassword(p), em);
     req.session.user = { id: user.id, username: user.username, role: user.role };
     res.redirect('/board');
   } catch (e) {
@@ -101,10 +125,14 @@ app.post('/logout', (req, res) => {
 
 // ---------- 管理员工作台 ----------
 app.get('/admin', requireAdmin, (req, res) => {
-  res.render('admin', { content: db.getContent(), users: db.listUsers(), posts: db.listPosts(), ok: !!req.query.ok });
+  res.render('admin', {
+    content: db.getContent(),
+    users: db.listUsers(),
+    posts: db.listPosts(),
+    logs: db.listLogs(),
+    ok: !!req.query.ok,
+  });
 });
-
-// 编辑网站内容
 app.post('/admin/content', requireAdmin, (req, res) => {
   const b = req.body || {};
   db.updateContent({
@@ -114,8 +142,6 @@ app.post('/admin/content', requireAdmin, (req, res) => {
   });
   res.redirect('/admin?ok=1');
 });
-
-// 指定 / 调整成员角色
 app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   const role = String((req.body && req.body.role) || '');
@@ -123,17 +149,64 @@ app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
   if (id === Number(req.session.user.id)) return res.redirect('/admin'); // 不能改自己的角色
   const admins = db.listUsers().filter((u) => u.role === 'admin');
   const target = db.listUsers().find((u) => u.id === id);
-  if (target && target.role === 'admin' && role === 'member' && admins.length <= 1) {
-    return res.redirect('/admin'); // 不能降级最后一个管理员
-  }
+  if (target && target.role === 'admin' && role === 'member' && admins.length <= 1) return res.redirect('/admin'); // 不能降级最后一个管理员
   db.setUserRole(id, role);
   res.redirect('/admin');
 });
-
-// 管理员删除任意动态
 app.post('/admin/posts/:id/delete', requireAdmin, (req, res) => {
   db.deletePostAsAdmin(req.params.id);
   res.redirect('/admin');
+});
+
+// ---------- 文件上传（管理员） ----------
+app.post('/api/upload', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: '上传失败：仅支持 PNG / JPG / JPEG / MP4' });
+  res.json({ url: '/uploads/' + req.file.filename });
+});
+
+// ---------- 日志 ----------
+app.get('/logs', (req, res) => res.render('logs', { logs: db.listLogs() }));
+app.get('/logs/new', requireAdmin, (req, res) => res.render('log-edit', { log: null, error: null }));
+app.post('/logs', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const title = String(b.title || '').trim();
+  if (!title) {
+    return res.status(400).render('log-edit', {
+      log: { title, content: b.content || '', cover_image: b.cover_image || '', video_url: b.video_url || '' },
+      error: '标题不能为空',
+    });
+  }
+  const log = db.createLog(title, String(b.content || ''), String(b.cover_image || ''), String(b.video_url || ''), req.session.user.id);
+  res.redirect('/logs/' + log.id);
+});
+app.get('/logs/:id', (req, res) => {
+  const log = db.getLog(req.params.id);
+  if (!log) return res.status(404).send('日志不存在。<a href="/logs">返回日志列表</a>');
+  res.render('log-detail', { log, comments: db.listComments(log.id), danmaku: db.listDanmaku(log.id) });
+});
+app.get('/logs/:id/edit', requireAdmin, (req, res) => {
+  const log = db.getLog(req.params.id);
+  if (!log) return res.status(404).send('日志不存在。');
+  res.render('log-edit', { log, error: null });
+});
+app.post('/logs/:id', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  db.updateLog(req.params.id, {
+    title: String(b.title || '').trim(),
+    content: String(b.content || ''),
+    cover_image: String(b.cover_image || ''),
+    video_url: String(b.video_url || ''),
+  });
+  res.redirect('/logs/' + req.params.id);
+});
+app.post('/logs/:id/delete', requireAdmin, (req, res) => {
+  db.deleteLog(req.params.id);
+  res.redirect('/logs');
+});
+app.post('/logs/:id/comments', requireLogin, (req, res) => {
+  const content = String((req.body && req.body.content) || '').trim();
+  if (content) db.addComment(req.params.id, req.session.user.id, content);
+  res.redirect('/logs/' + req.params.id + '#comments');
 });
 
 // ---------- Socket.io 实时交互 ----------
@@ -141,7 +214,7 @@ io.on('connection', (socket) => {
   const user = socket.request.session && socket.request.session.user;
   socket.emit('user:init', { user: user || null });
 
-  // 发布内容 → 广播给所有在线用户（实时）
+  // 发布动态 → 广播给所有在线用户（实时）
   socket.on('post:create', (payload) => {
     if (!user) return;
     const content = String((payload && payload.content) || '').trim();
@@ -150,7 +223,7 @@ io.on('connection', (socket) => {
     io.emit('post:new', post);
   });
 
-  // 删除内容 → 本人删自己的，管理员删任意
+  // 删除动态 → 本人删自己的，管理员删任意
   socket.on('post:delete', (payload) => {
     if (!user) return;
     const id = payload && payload.id;
@@ -159,6 +232,29 @@ io.on('connection', (socket) => {
     const ok = isAdmin ? db.deletePostAsAdmin(id) : db.deletePost(id, user.id);
     if (ok) io.emit('post:deleted', { id });
   });
+
+  // 加入某个日志的弹幕房间
+  socket.on('log:join', (logId) => {
+    if (logId) socket.join('log-' + logId);
+  });
+
+  // 发送弹幕 → 存库 + 实时广播给同房间在线用户
+  socket.on('danmaku:send', (payload) => {
+    if (!user) return;
+    const logId = Number(payload && payload.logId);
+    const content = String((payload && payload.content) || '').trim();
+    const videoTime = Number(payload && payload.video_time) || 0;
+    if (!logId || !content || content.length > 100) return;
+    const d = db.addDanmaku(logId, user.id, content, videoTime);
+    io.to('log-' + logId).emit('danmaku:new', d);
+  });
+});
+
+// 错误处理（如上传文件过大）
+app.use((err, req, res, next) => {
+  if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '文件过大（视频最大 150MB）' });
+  console.error(err);
+  res.status(500).send('服务器出错了。');
 });
 
 server.listen(PORT, () => {
