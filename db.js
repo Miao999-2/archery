@@ -60,6 +60,20 @@ CREATE TABLE IF NOT EXISTS danmaku (
   video_time REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS notices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS post_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `);
 
 function now() { return new Date().toISOString(); }
@@ -125,10 +139,14 @@ function listPosts() {
   `).all();
 }
 function deletePost(id, userId) {
-  return db.prepare('DELETE FROM posts WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
+  const ok = db.prepare('DELETE FROM posts WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
+  if (ok) db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+  return ok;
 }
 function deletePostAsAdmin(id) {
-  return db.prepare('DELETE FROM posts WHERE id = ?').run(Number(id)).changes > 0;
+  const ok = db.prepare('DELETE FROM posts WHERE id = ?').run(Number(id)).changes > 0;
+  if (ok) db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(Number(id));
+  return ok;
 }
 
 // ---------- 日志 ----------
@@ -206,6 +224,51 @@ function listDanmaku(logId) {
   `).all(Number(logId));
 }
 
+// ---------- 通知 ----------
+function createNotice(adminId, title, content) {
+  const ts = now();
+  const info = db.prepare('INSERT INTO notices(admin_id, title, content, created_at) VALUES(?, ?, ?, ?)')
+    .run(Number(adminId), title, content, ts);
+  return { id: Number(info.lastInsertRowid), title, content, created_at: ts };
+}
+function listNotices() {
+  return db.prepare(`
+    SELECT n.id, n.title, n.content, n.created_at, u.username AS admin_name
+    FROM notices n JOIN users u ON u.id = n.admin_id
+    ORDER BY n.id DESC
+  `).all();
+}
+function deleteNotice(id) {
+  return db.prepare('DELETE FROM notices WHERE id = ?').run(Number(id)).changes > 0;
+}
+
+// ---------- 动态评论 ----------
+function addPostComment(postId, userId, content) {
+  const user = db.prepare('SELECT username FROM users WHERE id = ?').get(Number(userId));
+  const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(Number(postId));
+  if (!user || !post) return null;
+  const ts = now();
+  const info = db.prepare('INSERT INTO post_comments(post_id, user_id, content, created_at) VALUES(?, ?, ?, ?)')
+    .run(Number(postId), Number(userId), content, ts);
+  return { id: Number(info.lastInsertRowid), post_id: Number(postId), username: user.username, content, created_at: ts };
+}
+function listPostCommentsByPosts(ids) {
+  const map = {};
+  if (!ids || !ids.length) return map;
+  const ph = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT pc.id, pc.post_id, pc.content, pc.created_at, u.username
+    FROM post_comments pc JOIN users u ON u.id = pc.user_id
+    WHERE pc.post_id IN (${ph}) ORDER BY pc.id ASC
+  `).all(...ids.map(Number));
+  for (const r of rows) (map[r.post_id] || (map[r.post_id] = [])).push(r);
+  return map;
+}
+function deletePostComment(id, userId, isAdmin) {
+  if (isAdmin) return db.prepare('DELETE FROM post_comments WHERE id = ?').run(Number(id)).changes > 0;
+  return db.prepare('DELETE FROM post_comments WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
+}
+
 module.exports = {
   createUser, findUser, listUsers, setUserRole,
   createPost, listPosts, deletePost, deletePostAsAdmin,
@@ -213,4 +276,6 @@ module.exports = {
   createLog, listLogs, getLog, updateLog, deleteLog,
   addComment, listComments,
   addDanmaku, listDanmaku,
+  createNotice, listNotices, deleteNotice,
+  addPostComment, listPostCommentsByPosts, deletePostComment,
 };
