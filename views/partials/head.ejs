@@ -13,6 +13,7 @@
     <a href="/">首页</a>
     <a href="/about">关于我们</a>
     <a href="/board">动态墙</a>
+    <a href="/logs">训练日志</a>
     <% if (user) { %>
       <span class="who">你好，<%= user.username %><% if (isAdmin) { %> · 管理员<% } %></span>
       <% if (isAdmin) { %><a href="/admin">工作台</a><% } %>
