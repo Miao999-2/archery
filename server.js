@@ -291,6 +291,13 @@ app.post('/api/post', requireLogin, (req, res) => {
   });
 });
 
+// ---------- 动态墙补拉（断线/休眠后，客户端用它同步错过的广播） ----------
+app.get('/api/posts', requireLogin, (req, res) => {
+  const since = Number(req.query.since) || 0;
+  const posts = db.listPosts().filter((p) => Number(p.id) > since);
+  res.json(posts);
+});
+
 // ---------- 管理员工作台 ----------
 app.get('/admin', requireAdmin, (req, res) => {
   res.render('admin', {
