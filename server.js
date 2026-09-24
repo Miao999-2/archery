@@ -257,13 +257,14 @@ io.on('connection', (socket) => {
     if (ok) io.emit('post:deleted', { id });
   });
 
-  // 评论动态 → 存库 + 实时广播给所有在线用户
+  // 评论动态（含回复某条评论）→ 存库 + 实时广播给所有在线用户
   socket.on('post:comment:send', (payload) => {
     if (!user) return;
     const postId = Number(payload && payload.postId);
     const content = String((payload && payload.content) || '').trim();
     if (!postId || !content || content.length > 200) return;
-    const c = db.addPostComment(postId, user.id, content);
+    const parentId = payload && payload.parentId ? Number(payload.parentId) : null;
+    const c = db.addPostComment(postId, user.id, content, parentId);
     if (c) io.emit('post:comment:new', c);
   });
 
