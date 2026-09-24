@@ -29,13 +29,43 @@
   </section>
 
   <section>
-    <h2>成员管理（指定管理员）</h2>
+    <h2>注册审批</h2>
+    <% if (!pendingUsers.length) { %>
+      <p class="muted">没有待审批的申请。</p>
+    <% } else { %>
+      <table class="user-table">
+        <thead><tr><th>用户名</th><th>邮箱</th><th>申请理由</th><th>申请时间</th><th>操作</th></tr></thead>
+        <tbody>
+          <% pendingUsers.forEach(u => { %>
+          <tr>
+            <td><%= u.username %></td>
+            <td class="muted"><%= u.email || '—' %></td>
+            <td><%= u.reason %></td>
+            <td class="muted"><%= u.created_at %></td>
+            <td>
+              <form method="post" action="/admin/users/<%= u.id %>/approve" class="inline">
+                <button class="btn small" type="submit">通过</button>
+              </form>
+              <form method="post" action="/admin/users/<%= u.id %>/reject" class="inline" onsubmit="return confirm('确定不通过该申请？')">
+                <button class="btn small ghost" type="submit">不通过</button>
+              </form>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    <% } %>
+  </section>
+
+  <section>
+    <h2>成员管理（指定管理员 / 删除成员）</h2>
     <table class="user-table">
-      <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead>
+      <thead><tr><th>用户名</th><th>昵称</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead>
       <tbody>
         <% users.forEach(u => { %>
         <tr>
           <td><%= u.username %><% if (user && u.id === user.id) { %> <span class="muted">（我）</span><% } %></td>
+          <td><%= u.nickname || '—' %></td>
           <td><span class="badge <%= u.role %>"><%= u.role === 'admin' ? '管理员' : '成员' %></span></td>
           <td class="muted"><%= u.created_at %></td>
           <td>
@@ -49,6 +79,9 @@
                   <button class="btn small" type="submit">设为管理员</button>
                 <% } %>
               </form>
+              <form method="post" action="/admin/users/<%= u.id %>/delete" class="inline" onsubmit="return confirm('确定删除该成员？其动态、评论、弹幕等数据将一并删除。')">
+                <button class="link-btn del" type="submit">删除</button>
+              </form>
             <% } %>
           </td>
         </tr>
@@ -56,6 +89,32 @@
       </tbody>
     </table>
   </section>
+
+  <% if (rejectedUsers.length) { %>
+  <section>
+    <h2>已拒绝的申请</h2>
+    <table class="user-table">
+      <thead><tr><th>用户名</th><th>邮箱</th><th>申请理由</th><th>操作</th></tr></thead>
+      <tbody>
+        <% rejectedUsers.forEach(u => { %>
+        <tr>
+          <td><%= u.username %></td>
+          <td class="muted"><%= u.email || '—' %></td>
+          <td><%= u.reason %></td>
+          <td>
+            <form method="post" action="/admin/users/<%= u.id %>/approve" class="inline">
+              <button class="btn small" type="submit">改为通过</button>
+            </form>
+            <form method="post" action="/admin/users/<%= u.id %>/delete" class="inline" onsubmit="return confirm('确定删除该申请？')">
+              <button class="link-btn del" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </section>
+  <% } %>
 
   <section>
     <h2>动态管理</h2>
@@ -66,7 +125,7 @@
         <% posts.forEach(p => { %>
           <li class="post">
             <div class="post-meta">
-              <span class="post-user"><%= p.username %></span>
+              <span class="post-user"><%= p.display_name %></span>
               <span class="post-time"><%= p.created_at %></span>
             </div>
             <p class="post-content"><%= p.content %></p>
@@ -92,7 +151,7 @@
               <span class="post-user"><%= l.title %></span>
               <span class="post-time"><%= l.created_at %></span>
             </div>
-            <p class="muted"><%= l.admin_name %> 发布<% if (l.video_url) { %> · 含视频<% } %></p>
+            <p class="muted"><%= l.display_name %> 发布<% if (l.video_url) { %> · 含视频<% } %></p>
             <p>
               <a class="link-btn" href="/logs/<%= l.id %>/edit">编辑</a>
               <form method="post" action="/logs/<%= l.id %>/delete" class="inline" onsubmit="return confirm('确定删除这篇日志？')">
