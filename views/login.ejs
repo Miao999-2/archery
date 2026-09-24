@@ -2,6 +2,7 @@
 <%- include('partials/head') %>
 <section class="auth">
   <h1>登录</h1>
+  <% if (msg) { %><p class="ok"><%= msg %></p><% } %>
   <% if (error) { %><p class="error"><%= error %></p><% } %>
   <form method="post" action="/login" class="form">
     <label>用户名<input name="username" autocomplete="username" required></label>
