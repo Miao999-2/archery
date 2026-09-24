@@ -300,11 +300,11 @@ server.listen(PORT, () => {
   console.log(`\n  射箭队网站已启动 →  http://localhost:${PORT}\n`);
 });
 
-// ---------- 数据持久化：定期 + 退出时备份到 R2 ----------
+// ---------- 数据持久化：定期 + 退出时备份到 GitHub 私密仓库 ----------
 async function doBackup() {
   try {
     db.checkpoint();
-    await backup.uploadNow();
+    await backup.uploadBackup();
   } catch (e) { /* 备份失败不影响主流程 */ }
 }
 
