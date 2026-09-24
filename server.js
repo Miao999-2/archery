@@ -7,6 +7,7 @@ const session = require('express-session');
 const multer = require('multer');
 const { Server } = require('socket.io');
 const db = require('./db');
+const backup = require('./backup');
 
 const SITE_NAME = '射箭队';
 const PORT = process.env.PORT || 3000;
@@ -298,3 +299,24 @@ app.use((err, req, res, next) => {
 server.listen(PORT, () => {
   console.log(`\n  射箭队网站已启动 →  http://localhost:${PORT}\n`);
 });
+
+// ---------- 数据持久化：定期 + 退出时备份到 R2 ----------
+async function doBackup() {
+  try {
+    db.checkpoint();
+    await backup.uploadNow();
+  } catch (e) { /* 备份失败不影响主流程 */ }
+}
+
+// 每 5 分钟备份一次（兜底：防崩溃/强杀导致的小段数据丢失）
+setInterval(doBackup, 5 * 60 * 1000);
+
+function shutdown(signal) {
+  console.log(`\n收到 ${signal}，正在备份数据后退出……`);
+  doBackup().finally(() => {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref(); // 兜底：5 秒内未退出则强退
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
