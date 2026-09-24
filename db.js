@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL DEFAULT '',
   hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
+  nickname TEXT NOT NULL DEFAULT '',
+  avatar TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'approved',
+  reason TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS posts (
@@ -83,15 +87,53 @@ CREATE TABLE IF NOT EXISTS post_likes (
 );
 `);
 
-// 迁移：为旧库补上 parent_id 列（评论回复功能）。ALTER 只加列、不动已有数据。
-{
-  const cols = db.prepare('PRAGMA table_info(post_comments)').all();
-  if (!cols.some((c) => c.name === 'parent_id')) {
-    db.exec('ALTER TABLE post_comments ADD COLUMN parent_id INTEGER');
+// 迁移：为旧库补充新列。ALTER 只加列、不动已有数据。
+function ensureColumn(table, col, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+}
+ensureColumn('post_comments', 'parent_id', 'INTEGER');
+ensureColumn('users', 'nickname', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'avatar', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'status', "TEXT NOT NULL DEFAULT 'approved'");
+ensureColumn('users', 'reason', "TEXT NOT NULL DEFAULT ''");
+
+// 迁移：把旧数据的 UTC 时间戳一次性转成北京时间字符串（含 T 的 ISO 串 → YYYY-MM-DD HH:mm:ss）
+convertLegacyTimestamps();
+
+function toBeijing(d) {
+  const bj = new Date(d.getTime() + 8 * 3600 * 1000); // UTC+8
+  const p = (n) => String(n).padStart(2, '0');
+  return `${bj.getUTCFullYear()}-${p(bj.getUTCMonth() + 1)}-${p(bj.getUTCDate())} ${p(bj.getUTCHours())}:${p(bj.getUTCMinutes())}:${p(bj.getUTCSeconds())}`;
+}
+function now() { return toBeijing(new Date()); }
+
+// 一次性把旧库的 UTC ISO 时间戳（含 T）转成北京时间字符串，幂等（无 T 则跳过）
+function convertLegacyTimestamps() {
+  const map = {
+    users: ['created_at'],
+    posts: ['created_at'],
+    comments: ['created_at'],
+    danmaku: ['created_at'],
+    notices: ['created_at'],
+    logs: ['created_at', 'updated_at'],
+    post_comments: ['created_at'],
+    post_likes: ['created_at'],
+  };
+  for (const table of Object.keys(map)) {
+    for (const col of map[table]) {
+      const rows = db.prepare(`SELECT id, ${col} AS v FROM ${table}`).all();
+      for (const r of rows) {
+        if (typeof r.v === 'string' && r.v.includes('T')) {
+          const d = new Date(r.v);
+          if (!isNaN(d.getTime())) {
+            db.prepare(`UPDATE ${table} SET ${col} = ? WHERE id = ?`).run(toBeijing(d), r.id);
+          }
+        }
+      }
+    }
   }
 }
-
-function now() { return new Date().toISOString(); }
 
 // 把 WAL 日志合并进主数据库文件（备份前调用，确保 data.sqlite 是完整快照）
 function checkpoint() {
@@ -124,18 +166,56 @@ function updateContent(patch) {
 }
 
 // ---------- 用户 ----------
-function createUser(username, hash, email = '') {
+function createUser(username, hash, email = '', reason = '') {
   const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   const role = count === 0 ? 'admin' : 'member'; // 第一个注册的用户自动成为管理员
-  const info = db.prepare('INSERT INTO users(username, email, hash, role, created_at) VALUES(?, ?, ?, ?, ?)')
-    .run(username, email, hash, role, now());
-  return { id: Number(info.lastInsertRowid), username, role };
+  const status = count === 0 ? 'approved' : 'pending'; // 首个用户自动通过，其余待管理员审批
+  const info = db.prepare('INSERT INTO users(username, email, hash, role, status, reason, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)')
+    .run(username, email, hash, role, status, reason, now());
+  return { id: Number(info.lastInsertRowid), username, role, status };
 }
 function findUser(username) {
   return db.prepare('SELECT * FROM users WHERE username = ?').get(username) || null;
 }
+function getUserById(id) {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(Number(id)) || null;
+}
+function getPublicProfile(username) {
+  const u = db.prepare('SELECT id, username, nickname, avatar, role, status, created_at FROM users WHERE username = ?').get(username);
+  if (!u) return null;
+  u.display_name = u.nickname || u.username;
+  return u;
+}
 function listUsers() {
-  return db.prepare('SELECT id, username, email, role, created_at FROM users ORDER BY id').all();
+  return db.prepare('SELECT id, username, nickname, avatar, status, email, role, created_at FROM users ORDER BY id').all();
+}
+function listUsersByStatus(status) {
+  return db.prepare('SELECT id, username, nickname, email, reason, created_at FROM users WHERE status = ? ORDER BY id').all(status);
+}
+function setUserStatus(id, status) {
+  if (status !== 'approved' && status !== 'pending' && status !== 'rejected') return false;
+  return db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, Number(id)).changes > 0;
+}
+function updateProfile(userId, nickname) {
+  return db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(String(nickname || '').trim(), Number(userId)).changes > 0;
+}
+function updateUserAvatar(userId, avatar) {
+  return db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(String(avatar || ''), Number(userId)).changes > 0;
+}
+function deleteUser(id) {
+  id = Number(id);
+  const postIds = db.prepare('SELECT id FROM posts WHERE user_id = ?').all(id).map((r) => r.id);
+  for (const pid of postIds) {
+    db.prepare('DELETE FROM post_comments WHERE post_id = ?').run(pid);
+    db.prepare('DELETE FROM post_likes WHERE post_id = ?').run(pid);
+  }
+  db.prepare('DELETE FROM posts WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM post_comments WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM post_likes WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM comments WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM danmaku WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM notices WHERE admin_id = ?').run(id);
+  return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
 }
 function setUserRole(id, role) {
   if (role !== 'admin' && role !== 'member') return false;
@@ -149,14 +229,30 @@ function createPost(userId, content) {
   const ts = now();
   const info = db.prepare('INSERT INTO posts(user_id, content, created_at) VALUES(?, ?, ?)')
     .run(user.id, content, ts);
-  return { id: Number(info.lastInsertRowid), username: user.username, content, created_at: ts };
+  return {
+    id: Number(info.lastInsertRowid),
+    username: user.username,
+    display_name: user.nickname || user.username,
+    avatar: user.avatar,
+    content,
+    created_at: ts,
+  };
 }
 function listPosts() {
   return db.prepare(`
-    SELECT p.id, p.content, p.created_at, u.username
+    SELECT p.id, p.content, p.created_at, u.username, u.avatar,
+           COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM posts p JOIN users u ON u.id = p.user_id
     ORDER BY p.id DESC LIMIT 200
   `).all();
+}
+function listPostsByUser(userId) {
+  return db.prepare(`
+    SELECT p.id, p.content, p.created_at, u.username, u.avatar,
+           COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
+    FROM posts p JOIN users u ON u.id = p.user_id
+    WHERE p.user_id = ? ORDER BY p.id DESC LIMIT 100
+  `).all(Number(userId));
 }
 function deletePost(id, userId) {
   const ok = db.prepare('DELETE FROM posts WHERE id = ? AND user_id = ?').run(Number(id), Number(userId)).changes > 0;
@@ -186,14 +282,15 @@ function createLog(title, content, cover_image, video_url, adminId) {
 }
 function listLogs() {
   return db.prepare(`
-    SELECT l.id, l.title, l.cover_image, l.video_url, l.created_at, u.username AS admin_name
+    SELECT l.id, l.title, l.cover_image, l.video_url, l.created_at, u.avatar,
+           COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM logs l JOIN users u ON u.id = l.admin_id
     ORDER BY l.id DESC
   `).all();
 }
 function getLog(id) {
   return db.prepare(`
-    SELECT l.*, u.username AS admin_name
+    SELECT l.*, u.avatar, COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM logs l JOIN users u ON u.id = l.admin_id
     WHERE l.id = ?
   `).get(Number(id)) || null;
@@ -228,7 +325,8 @@ function addComment(logId, userId, content) {
 }
 function listComments(logId) {
   return db.prepare(`
-    SELECT c.id, c.content, c.created_at, u.username
+    SELECT c.id, c.content, c.created_at, u.username, u.avatar,
+           COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM comments c JOIN users u ON u.id = c.user_id
     WHERE c.log_id = ? ORDER BY c.id ASC
   `).all(Number(logId));
@@ -259,7 +357,8 @@ function createNotice(adminId, title, content) {
 }
 function listNotices() {
   return db.prepare(`
-    SELECT n.id, n.title, n.content, n.created_at, u.username AS admin_name
+    SELECT n.id, n.title, n.content, n.created_at, u.avatar,
+           COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name
     FROM notices n JOIN users u ON u.id = n.admin_id
     ORDER BY n.id DESC
   `).all();
@@ -287,7 +386,8 @@ function addPostComment(postId, userId, content, parentId = null) {
 function getPostComment(id) {
   return db.prepare(`
     SELECT pc.id, pc.post_id, pc.content, pc.created_at, pc.parent_id,
-           u.username, pu.username AS reply_to
+           u.username, u.avatar, COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name,
+           pu.username AS reply_to, COALESCE(NULLIF(pu.nickname, ''), pu.username) AS reply_to_display
     FROM post_comments pc
     JOIN users u ON u.id = pc.user_id
     LEFT JOIN post_comments pp ON pp.id = pc.parent_id
@@ -301,7 +401,8 @@ function listPostCommentsByPosts(ids) {
   const ph = ids.map(() => '?').join(',');
   const rows = db.prepare(`
     SELECT pc.id, pc.post_id, pc.content, pc.created_at, pc.parent_id,
-           u.username, pu.username AS reply_to
+           u.username, u.avatar, COALESCE(NULLIF(u.nickname, ''), u.username) AS display_name,
+           pu.username AS reply_to, COALESCE(NULLIF(pu.nickname, ''), pu.username) AS reply_to_display
     FROM post_comments pc
     JOIN users u ON u.id = pc.user_id
     LEFT JOIN post_comments pp ON pp.id = pc.parent_id
@@ -345,8 +446,9 @@ function getLikeInfoByPosts(ids, userId) {
 }
 
 module.exports = {
-  createUser, findUser, listUsers, setUserRole,
-  createPost, listPosts, deletePost, deletePostAsAdmin,
+  createUser, findUser, getUserById, getPublicProfile, listUsers, listUsersByStatus,
+  setUserRole, setUserStatus, updateProfile, updateUserAvatar, deleteUser,
+  createPost, listPosts, listPostsByUser, deletePost, deletePostAsAdmin,
   getContent, updateContent,
   createLog, listLogs, getLog, updateLog, deleteLog,
   addComment, listComments,
