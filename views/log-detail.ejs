@@ -1,0 +1,108 @@
+<% pageTitle = siteName + ' · ' + log.title; %>
+<%- include('partials/head') %>
+<section class="page log-detail">
+  <h1><%= log.title %></h1>
+  <p class="muted">由 <%= log.admin_name %> 发布于 <%= log.created_at %></p>
+  <% if (isAdmin) { %>
+    <p class="log-actions">
+      <a class="btn small" href="/logs/<%= log.id %>/edit">编辑</a>
+      <form method="post" action="/logs/<%= log.id %>/delete" class="inline" onsubmit="return confirm('确定删除这篇日志？')">
+        <button class="btn small ghost" type="submit">删除</button>
+      </form>
+    </p>
+  <% } %>
+
+  <% if (log.video_url) { %>
+    <div class="danmaku-box">
+      <video id="log-video" src="<%= log.video_url %>" controls preload="metadata"></video>
+      <div id="danmaku-layer" class="danmaku-layer"></div>
+    </div>
+    <div class="danmaku-bar">
+      <% if (user) { %>
+        <input id="danmaku-input" type="text" maxlength="100" placeholder="发送弹幕…（回车发送）">
+        <button id="danmaku-send" class="btn small" type="button">发送</button>
+      <% } else { %>
+        <span class="muted"><a href="/login">登录</a>后即可发送弹幕</span>
+      <% } %>
+    </div>
+  <% } %>
+
+  <div class="log-content"><%- log.content %></div>
+
+  <div id="comments" class="comments">
+    <h2>评论（<%= comments.length %>）</h2>
+    <% if (user) { %>
+      <form method="post" action="/logs/<%= log.id %>/comments" class="comment-form">
+        <textarea name="content" maxlength="500" placeholder="写下你的评论…" required></textarea>
+        <button class="btn small" type="submit">发表评论</button>
+      </form>
+    <% } else { %>
+      <p class="muted"><a href="/login">登录</a>后即可发表评论。</p>
+    <% } %>
+    <ul class="comment-list">
+      <% comments.forEach(c => { %>
+        <li class="comment">
+          <div class="comment-meta">
+            <span class="post-user"><%= c.username %></span>
+            <span class="post-time"><%= c.created_at %></span>
+          </div>
+          <p class="comment-body"><%= c.content %></p>
+        </li>
+      <% }) %>
+      <% if (!comments.length) { %><li class="empty">还没有评论，来抢沙发。</li><% } %>
+    </ul>
+  </div>
+</section>
+
+<% if (log.video_url) { %>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const LOG_ID = <%- JSON.stringify(log.id) %>;
+  const preset = <%- JSON.stringify(danmaku).replace(/<\//g, '<\\/') %>;
+  const socket = io();
+  socket.emit('log:join', LOG_ID);
+
+  const video = document.getElementById('log-video');
+  const layer = document.getElementById('danmaku-layer');
+  const input = document.getElementById('danmaku-input');
+  const sendBtn = document.getElementById('danmaku-send');
+  const fired = new Set();
+
+  function spawn(text) {
+    if (!layer) return;
+    const el = document.createElement('div');
+    el.className = 'danmaku-item';
+    el.textContent = text;
+    el.style.top = (5 + Math.random() * 80) + '%';
+    layer.appendChild(el);
+    setTimeout(() => el.remove(), 6200);
+  }
+
+  // 回放：按视频时间轴触发历史弹幕
+  const sorted = preset.slice().sort((a, b) => a.video_time - b.video_time);
+  video.addEventListener('timeupdate', () => {
+    for (const d of sorted) {
+      if (!fired.has(d.id) && video.currentTime >= d.video_time) {
+        fired.add(d.id);
+        spawn(d.content);
+      }
+    }
+  });
+
+  function sendDanmaku() {
+    if (!input) return;
+    const c = input.value.trim();
+    if (!c) return;
+    socket.emit('danmaku:send', { logId: LOG_ID, content: c, video_time: video.currentTime });
+    input.value = '';
+  }
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDanmaku(); });
+  if (sendBtn) sendBtn.addEventListener('click', sendDanmaku);
+
+  // 实时：收到别人的弹幕立即显示
+  socket.on('danmaku:new', (d) => {
+    if (d.log_id === LOG_ID) { fired.add(d.id); spawn(d.content); }
+  });
+</script>
+<% } %>
+<%- include('partials/foot') %>
