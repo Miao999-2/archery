@@ -1,18 +1,19 @@
 {
   "name": "archery-team-site",
-  "version": "0.1.0",
-  "description": "射箭队专属网站 —— 多用户、实时交互",
+  "version": "0.2.0",
+  "description": "射箭队专属网站 —— 多用户、实时交互、训练日志与视频弹幕",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "dependencies": {
     "ejs": "^3.1.10",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
+    "multer": "^2.0.1",
     "socket.io": "^4.8.1"
   }
 }
