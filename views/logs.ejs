@@ -18,7 +18,7 @@
           <% } %>
           <div class="log-card-body">
             <h3><%= l.title %></h3>
-            <p class="muted"><%= l.display_name %> · <%= l.created_at %></p>
+            <p class="muted"><a href="/u/<%= l.username %>"><%= l.display_name %></a> · <%= l.created_at %></p>
             <% if (l.video_url) { %><span class="badge member">含视频</span><% } %>
           </div>
         </a>
