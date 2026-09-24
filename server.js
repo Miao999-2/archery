@@ -5,6 +5,7 @@ const fs = require('fs');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const { Jimp } = require('jimp');
 const { Server } = require('socket.io');
 const db = require('./db');
 const backup = require('./backup');
@@ -96,13 +97,34 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|mp4)$/i.test(file.originalname || '')),
 });
 
-// 头像上传（存入内存，转 base64 存入数据库，随备份一起持久化，不落磁盘）
+// 头像上传（存入内存，自动压缩后转 base64 存库，随备份一起持久化，不落磁盘）
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|gif|webp)$/i.test(file.originalname || '')),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 放大阈值：过大的文件交给下方压缩，而不是直接拒绝
+  fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|gif)$/i.test(file.originalname || '')),
 });
-const AVATAR_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+
+// 判断图片是否真的包含透明像素（jimp 解出的位图通常都带 alpha 通道，不能用 hasAlpha() 判断）
+function hasTransparency(img) {
+  const data = img.bitmap.data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 255) return true;
+  }
+  return false;
+}
+
+// 压缩头像：最长边超过 512 则等比缩小（保持宽高比、不拉伸不补边）；有透明则保留 PNG，否则转 JPEG 减小体积
+const AVATAR_MAX_DIM = 512;
+async function compressAvatar(buffer) {
+  const img = await Jimp.read(buffer);
+  if (img.width > AVATAR_MAX_DIM || img.height > AVATAR_MAX_DIM) {
+    const scale = Math.min(AVATAR_MAX_DIM / img.width, AVATAR_MAX_DIM / img.height);
+    img.resize({ w: Math.max(1, Math.round(img.width * scale)), h: Math.max(1, Math.round(img.height * scale)) });
+  }
+  const mime = hasTransparency(img) ? 'image/png' : 'image/jpeg';
+  const out = await img.getBuffer(mime, { quality: 82 });
+  return { mime, buffer: out };
+}
 
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
@@ -185,7 +207,7 @@ app.get('/settings', requireLogin, (req, res) => {
   res.render('settings', {
     u: fresh,
     ok: req.query.ok,
-    err: req.query.err === 'avatar' ? '头像上传失败：仅支持 PNG / JPG / JPEG / GIF / WebP（≤2MB）' : (req.query.err === 'nickname' ? '昵称不超过 30 个字符' : null),
+    err: req.query.err === 'avatar' ? '头像上传失败：请上传 PNG / JPG / JPEG / GIF 图片（系统会自动压缩过大图片）' : (req.query.err === 'nickname' ? '昵称不超过 30 个字符' : null),
   });
 });
 app.post('/settings', requireLogin, (req, res) => {
@@ -194,13 +216,18 @@ app.post('/settings', requireLogin, (req, res) => {
   db.updateProfile(req.session.user.id, nickname);
   res.redirect('/settings?ok=1');
 });
-app.post('/settings/avatar', requireLogin, avatarUpload.single('avatar'), (req, res) => {
-  if (!req.file) return res.redirect('/settings?err=avatar');
-  const ext = (path.extname(req.file.originalname) || '').toLowerCase();
-  const mime = AVATAR_MIME[ext] || 'image/png';
-  const dataUrl = `data:${mime};base64,${req.file.buffer.toString('base64')}`;
-  db.updateUserAvatar(req.session.user.id, dataUrl);
-  res.redirect('/settings?ok=1');
+app.post('/settings/avatar', requireLogin, (req, res) => {
+  avatarUpload.single('avatar')(req, res, async (err) => {
+    if (err || !req.file) return res.redirect('/settings?err=avatar'); // 含文件过大 / 非图片格式
+    try {
+      const { mime, buffer } = await compressAvatar(req.file.buffer);
+      const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+      db.updateUserAvatar(req.session.user.id, dataUrl);
+      res.redirect('/settings?ok=1');
+    } catch (e) {
+      res.redirect('/settings?err=avatar'); // 图片损坏或无法解码
+    }
+  });
 });
 
 // ---------- 管理员工作台 ----------
