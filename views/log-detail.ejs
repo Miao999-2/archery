@@ -2,7 +2,7 @@
 <%- include('partials/head') %>
 <section class="page log-detail">
   <h1><%= log.title %></h1>
-  <p class="muted">由 <%= log.display_name %> 发布于 <%= log.created_at %></p>
+  <p class="muted">由 <a href="/u/<%= log.username %>"><%= log.display_name %></a> 发布于 <%= log.created_at %></p>
   <% if (isAdmin) { %>
     <p class="log-actions">
       <a class="btn small" href="/logs/<%= log.id %>/edit">编辑</a>
@@ -43,7 +43,7 @@
       <% comments.forEach(c => { %>
         <li class="comment">
           <div class="comment-meta">
-            <span class="post-user"><%= c.display_name %></span>
+            <a class="post-user" href="/u/<%= c.username %>"><%= c.display_name %></a>
             <span class="post-time"><%= c.created_at %></span>
           </div>
           <p class="comment-body"><%= c.content %></p>
