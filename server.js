@@ -91,7 +91,12 @@ app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
 app.get('/about', (req, res) => res.render('about', { content: db.getContent() }));
 app.get('/board', (req, res) => {
   const posts = db.listPosts();
-  res.render('board', { posts, commentsByPost: db.listPostCommentsByPosts(posts.map((p) => p.id)) });
+  const userId = req.session.user ? req.session.user.id : null;
+  res.render('board', {
+    posts,
+    commentsByPost: db.listPostCommentsByPosts(posts.map((p) => p.id)),
+    likesByPost: db.getLikeInfoByPosts(posts.map((p) => p.id), userId),
+  });
 });
 
 app.get('/login', (req, res) => res.render('login', { error: null }));
@@ -270,6 +275,15 @@ io.on('connection', (socket) => {
     const isAdmin = fresh && fresh.role === 'admin';
     const ok = db.deletePostComment(id, user.id, isAdmin);
     if (ok) io.emit('post:comment:deleted', { id });
+  });
+
+  // 点赞/取消点赞 → 实时广播最新点赞数与本人状态
+  socket.on('post:like', (payload) => {
+    if (!user) return;
+    const postId = Number(payload && payload.postId);
+    if (!postId) return;
+    const r = db.toggleLike(postId, user.id);
+    if (r) io.emit('post:like:changed', r);
   });
 
   // 加入某个日志的弹幕房间
