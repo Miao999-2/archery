@@ -6,8 +6,14 @@
 
   <% if (user) { %>
     <form id="post-form" class="post-form">
-      <textarea id="post-input" maxlength="500" placeholder="说点什么……（如：训练安排、比赛通知）" required></textarea>
-      <button class="btn" type="submit">发布</button>
+      <textarea id="post-input" maxlength="500" placeholder="说点什么……（可附一张图片）"></textarea>
+      <div class="post-form-foot">
+        <label class="post-image-pick">📷 添加图片
+          <input id="post-image" type="file" accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif">
+        </label>
+        <button class="btn" type="submit">发布</button>
+      </div>
+      <img id="post-image-preview" class="post-image-preview" alt="" hidden>
     </form>
   <% } else { %>
     <div class="notice">
@@ -27,6 +33,7 @@
           <span class="post-time"><%= p.created_at %></span>
         </div>
         <p class="post-content"><%= p.content %></p>
+        <% if (p.image) { %><img class="post-image" src="<%= p.image %>" alt=""><% } %>
         <div class="post-actions">
           <button class="link-btn like-btn<%= likesByPost[p.id].liked ? ' liked' : '' %>" data-id="<%= p.id %>" type="button">
             <span class="like-icon"><%= likesByPost[p.id].liked ? '❤️' : '🤍' %></span>
@@ -167,6 +174,12 @@
     a.textContent = p.display_name || p.username;
     mu.appendChild(a);
     li.querySelector('.post-content').textContent = p.content;
+    if (p.image) {
+      const pimg = document.createElement('img');
+      pimg.className = 'post-image';
+      pimg.src = p.image;
+      li.querySelector('.post-content').insertAdjacentElement('afterend', pimg);
+    }
     li.appendChild(commentsSection(p));
     return li;
   }
@@ -289,16 +302,42 @@
     }
   });
 
-  // 发布动态
+  // 图片选择预览
+  const imgInput = document.getElementById('post-image');
+  const preview = document.getElementById('post-image-preview');
+  if (imgInput && preview) {
+    imgInput.addEventListener('change', () => {
+      const f = imgInput.files && imgInput.files[0];
+      if (!f) { preview.hidden = true; preview.removeAttribute('src'); return; }
+      preview.src = URL.createObjectURL(f);
+      preview.hidden = false;
+    });
+  }
+
+  // 发布动态（支持可选图片，经 /api/post 上传压缩后，帖子会通过 socket post:new 广播回来）
   const form = document.getElementById('post-form');
   if (form) {
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = document.getElementById('post-input');
       const content = input.value.trim();
-      if (!content) return;
-      socket.emit('post:create', { content: content });
-      input.value = '';
+      const hasImage = imgInput && imgInput.files && imgInput.files.length > 0;
+      if (!content && !hasImage) return;
+      const fd = new FormData();
+      fd.append('content', content);
+      if (hasImage) fd.append('image', imgInput.files[0]);
+      try {
+        const res = await fetch('/api/post', { method: 'POST', body: fd });
+        if (!res.ok) { alert('发布失败，请重试'); return; }
+        let data = null;
+        try { data = await res.json(); } catch (e) { data = null; }
+        if (!data || data.ok !== true) { alert('发布失败，请重试'); return; }
+        input.value = '';
+        if (imgInput) imgInput.value = '';
+        if (preview) { preview.hidden = true; preview.removeAttribute('src'); }
+      } catch (err) {
+        alert('发布失败，请重试');
+      }
     });
   }
 </script>
