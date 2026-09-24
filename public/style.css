@@ -84,7 +84,8 @@ a:hover { color: var(--gold-dk); }
 .auth h1 { color: var(--navy); }
 .form { display: flex; flex-direction: column; gap: 14px; margin: 18px 0; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
-.form input { padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.form input, .form textarea { padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.form textarea { resize: vertical; }
 .error { color: var(--red); }
 
 .footer { text-align: center; padding: 30px 20px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); }
@@ -179,3 +180,32 @@ a:hover { color: var(--gold-dk); }
 .post-comment-replyto { color: var(--gold-dk); font-size: 13px; margin-right: 2px; }
 .reply-btn { font-size: 12px; margin-left: 8px; }
 .reply-inline { margin-left: 20px; margin-top: 8px; }
+.reply-inline .link-btn { font-size: 13px; }
+
+/* ---------- 头像 / 个人主页 / 设置 ---------- */
+.avatar-sm, .avatar-xs, .avatar-lg { object-fit: cover; border-radius: 50%; flex: none; background: #eee7d8; }
+.avatar-sm { width: 24px; height: 24px; }
+.avatar-xs { width: 18px; height: 18px; margin-right: 4px; vertical-align: middle; }
+.avatar-lg { width: 80px; height: 80px; }
+.avatar-placeholder { display: inline-flex; align-items: center; justify-content: center; font-size: 14px; color: var(--gold-dk); }
+.avatar-sm.avatar-placeholder { font-size: 12px; }
+.avatar-lg.avatar-placeholder { font-size: 30px; }
+
+.nav-user { display: inline-flex; align-items: center; gap: 6px; color: #d9d4c7; }
+.nav-user:hover { color: var(--gold); }
+.post-meta { align-items: center; }
+.post-meta-user { display: inline-flex; align-items: center; gap: 6px; }
+.post-meta-user .avatar-sm { margin-right: 2px; }
+
+.profile-head { display: flex; gap: 20px; align-items: center; margin: 10px 0 30px; }
+.profile-info h1 { color: var(--navy); font-size: 26px; }
+.profile-info .btn { margin-top: 8px; }
+.profile h2 { color: var(--navy); margin: 20px 0 10px; font-size: 20px; }
+
+.settings { max-width: 560px; }
+.settings-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 26px; margin: 18px 0; }
+.settings-card h2 { color: var(--navy); font-size: 18px; margin-bottom: 12px; }
+.avatar-row { display: flex; gap: 20px; align-items: center; }
+.avatar-form { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.avatar-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.avatar-form input[type="file"] { font-size: 13px; }
