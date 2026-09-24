@@ -10,7 +10,7 @@ const { Server } = require('socket.io');
 const db = require('./db');
 const backup = require('./backup');
 
-const SITE_NAME = '射箭队';
+const SITE_NAME = 'RUC射箭队';
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -489,7 +489,7 @@ app.use((err, req, res, next) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n  射箭队网站已启动 →  http://localhost:${PORT}\n`);
+  console.log(`\n  RUC射箭队网站已启动 →  http://localhost:${PORT}\n`);
 });
 
 // ---------- 数据持久化：定期 + 退出时备份到 GitHub 私密仓库 ----------
