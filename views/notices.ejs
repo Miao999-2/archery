@@ -1,0 +1,44 @@
+<% pageTitle = siteName + ' · 通知'; %>
+<%- include('partials/head') %>
+<section class="page">
+  <div class="logs-head">
+    <h1>通知</h1>
+  </div>
+  <p class="muted">队内公告与通知，仅管理员可发布。</p>
+
+  <% if (isAdmin) { %>
+    <form method="post" action="/notices" class="notice-form">
+      <div class="admin-field">
+        <label>通知标题</label>
+        <input name="title" maxlength="100" required placeholder="例如：本周六训练时间调整">
+      </div>
+      <div class="admin-field">
+        <label>通知内容</label>
+        <textarea name="content" rows="4" maxlength="1000" placeholder="通知正文……"></textarea>
+      </div>
+      <button class="btn" type="submit">发布通知</button>
+    </form>
+  <% } %>
+
+  <% if (!notices.length) { %>
+    <p class="empty">还没有通知。</p>
+  <% } else { %>
+    <ul class="posts">
+      <% notices.forEach(n => { %>
+        <li class="post notice-item">
+          <div class="post-meta">
+            <span class="post-user"><%= n.title %></span>
+            <span class="post-time"><%= n.admin_name %> · <%= n.created_at %></span>
+          </div>
+          <p class="post-content"><%= n.content %></p>
+          <% if (isAdmin) { %>
+            <form method="post" action="/notices/<%= n.id %>/delete" class="inline" onsubmit="return confirm('确定删除这条通知？')">
+              <button class="link-btn del" type="submit">删除</button>
+            </form>
+          <% } %>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('partials/foot') %>
