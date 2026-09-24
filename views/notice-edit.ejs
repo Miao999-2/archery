@@ -1,0 +1,19 @@
+<% pageTitle = siteName + ' · 编辑通知'; %>
+<%- include('partials/head') %>
+<section class="page settings">
+  <h1>编辑通知</h1>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+  <form method="post" action="/notices/<%= n.id %>/edit" class="form">
+    <label>通知标题
+      <input name="title" maxlength="100" required value="<%= n.title %>" placeholder="通知标题">
+    </label>
+    <label>通知内容
+      <textarea name="content" rows="5" maxlength="1000"><%= n.content %></textarea>
+    </label>
+    <div class="post-form-foot">
+      <a class="btn ghost" href="/notices">取消</a>
+      <button class="btn" type="submit">保存修改</button>
+    </div>
+  </form>
+</section>
+<%- include('partials/foot') %>
