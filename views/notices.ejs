@@ -28,7 +28,7 @@
         <li class="post notice-item">
           <div class="post-meta">
             <span class="post-user"><%= n.title %></span>
-            <span class="post-time"><%= n.admin_name %> · <%= n.created_at %></span>
+            <span class="post-time"><%= n.display_name %> · <%= n.created_at %></span>
           </div>
           <p class="post-content"><%= n.content %></p>
           <% if (isAdmin) { %>
