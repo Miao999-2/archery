@@ -22,7 +22,8 @@
       <% const cList = commentsByPost[p.id] || []; %>
       <li class="post" data-id="<%= p.id %>">
         <div class="post-meta">
-          <span class="post-user"><%= p.username %></span>
+          <% if (p.avatar) { %><img class="avatar-sm" src="<%= p.avatar %>" alt=""><% } %>
+          <a class="post-user" href="/u/<%= p.username %>"><%= p.display_name %></a>
           <span class="post-time"><%= p.created_at %></span>
         </div>
         <p class="post-content"><%= p.content %></p>
@@ -41,11 +42,12 @@
             <ul class="post-comment-list">
               <% cList.forEach(c => { %>
                 <li class="post-comment<%= c.parent_id ? ' is-reply' : '' %>" data-cid="<%= c.id %>">
-                  <span class="post-comment-user"><%= c.username %>：</span>
-                  <% if (c.reply_to) { %><span class="post-comment-replyto">回复 @<%= c.reply_to %>：</span><% } %>
+                  <% if (c.avatar) { %><img class="avatar-xs" src="<%= c.avatar %>" alt=""><% } %>
+                  <span class="post-comment-user"><%= c.display_name %>：</span>
+                  <% if (c.reply_to) { %><span class="post-comment-replyto">回复 @<%= c.reply_to_display %>：</span><% } %>
                   <span class="post-comment-body"><%= c.content %></span>
                   <% if (user) { %>
-                    <button class="link-btn reply-btn" data-cid="<%= c.id %>" data-user="<%= c.username %>" type="button">回复</button>
+                    <button class="link-btn reply-btn" data-cid="<%= c.id %>" data-user="<%= c.display_name %>" type="button">回复</button>
                   <% } %>
                   <% if (user && (isAdmin || user.username === c.username)) { %>
                     <button class="link-btn del-comment" data-cid="<%= c.id %>" type="button">删除</button>
@@ -77,8 +79,13 @@
   const socket = io();
 
   function timeStr(iso) {
-    try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); }
-    catch (e) { return iso; }
+    if (!iso) return '';
+    // 服务端已存北京时间字符串（YYYY-MM-DD HH:mm:ss），直接展示；旧 ISO 串兜底转换
+    if (String(iso).includes('T')) {
+      try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); }
+      catch (e) { return iso; }
+    }
+    return iso;
   }
 
   function commentItem(c) {
@@ -86,19 +93,27 @@
     li.className = 'post-comment' + (c.parent_id ? ' is-reply' : '');
     li.dataset.cid = c.id;
     const canDel = currentUser && (currentIsAdmin || currentUser === c.username);
+    const name = c.display_name || c.username;
+    const replyTo = c.reply_to_display || c.reply_to;
     li.innerHTML =
       '<span class="post-comment-user"></span>' +
       (c.reply_to ? '<span class="post-comment-replyto"></span>' : '') +
       '<span class="post-comment-body"></span>' +
       (currentUser ? '<button class="link-btn reply-btn" type="button">回复</button>' : '') +
       (canDel ? '<button class="link-btn del-comment" type="button">删除</button>' : '');
-    li.querySelector('.post-comment-user').textContent = c.username + '：';
-    if (c.reply_to) li.querySelector('.post-comment-replyto').textContent = '回复 @' + c.reply_to + '：';
+    if (c.avatar) {
+      const img = document.createElement('img');
+      img.className = 'avatar-xs';
+      img.src = c.avatar;
+      li.insertBefore(img, li.firstChild);
+    }
+    li.querySelector('.post-comment-user').textContent = name + '：';
+    if (c.reply_to) li.querySelector('.post-comment-replyto').textContent = '回复 @' + replyTo + '：';
     li.querySelector('.post-comment-body').textContent = c.content;
     if (currentUser) {
       const rb = li.querySelector('.reply-btn');
       rb.dataset.cid = c.id;
-      rb.dataset.user = c.username;
+      rb.dataset.user = name; // 仅用于输入框占位文字
     }
     if (canDel) li.querySelector('.del-comment').dataset.cid = c.id;
     return li;
@@ -130,10 +145,21 @@
     const del = (currentUser && (currentIsAdmin || currentUser === p.username))
       ? '<button class="link-btn del" data-id="' + p.id + '" type="button">删除</button>' : '';
     li.innerHTML =
-      '<div class="post-meta"><span class="post-user"></span><span class="post-time">' + timeStr(p.created_at) + '</span></div>' +
+      '<div class="post-meta"><span class="post-meta-user"></span><span class="post-time">' + timeStr(p.created_at) + '</span></div>' +
       '<p class="post-content"></p>' +
       '<div class="post-actions">' + likeBtnHtml(p.id, 0, false) + '</div>' + del;
-    li.querySelector('.post-user').textContent = p.username;
+    const mu = li.querySelector('.post-meta-user');
+    if (p.avatar) {
+      const img = document.createElement('img');
+      img.className = 'avatar-sm';
+      img.src = p.avatar;
+      mu.appendChild(img);
+    }
+    const a = document.createElement('a');
+    a.className = 'post-user';
+    a.href = '/u/' + encodeURIComponent(p.username);
+    a.textContent = p.display_name || p.username;
+    mu.appendChild(a);
     li.querySelector('.post-content').textContent = p.content;
     li.appendChild(commentsSection(p));
     return li;
@@ -219,8 +245,14 @@
       rbtn.className = 'btn small';
       rbtn.type = 'submit';
       rbtn.textContent = '回复';
+      const cbtn = document.createElement('button');
+      cbtn.className = 'link-btn';
+      cbtn.type = 'button';
+      cbtn.textContent = '取消';
+      cbtn.addEventListener('click', () => form.remove());
       form.appendChild(rinput);
       form.appendChild(rbtn);
+      form.appendChild(cbtn);
       li.appendChild(form);
       rinput.focus();
       return;
