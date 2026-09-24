@@ -226,6 +226,38 @@
     btn.querySelector('.like-count').textContent = r.like_count;
   });
 
+  // —— 断线/休眠兜底：socket 掉线或页面切后台时会漏掉广播，这里在重连/回到前台/定时补拉 ——
+  function maxPostId() {
+    let max = 0;
+    postsEl.querySelectorAll('.post[data-id]').forEach((el) => {
+      const id = Number(el.dataset.id);
+      if (id > max) max = id;
+    });
+    return max;
+  }
+
+  async function catchUp() {
+    const since = maxPostId();
+    try {
+      const res = await fetch('/api/posts?since=' + since);
+      if (!res.ok) return;
+      const list = await res.json();
+      if (!Array.isArray(list) || !list.length) return;
+      const empty = postsEl.querySelector('.empty');
+      if (empty) empty.remove();
+      // 服务端按 id 倒序返回，倒过来按正序 prepend，保证最新的一条在最上面
+      list.slice().reverse().forEach((p) => {
+        if (Number(p.id) > since) postsEl.prepend(postEl(p));
+      });
+    } catch (e) { /* 忽略，下次再试 */ }
+  }
+
+  socket.on('connect', catchUp);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) catchUp();
+  });
+  setInterval(catchUp, 60000);
+
   // 点赞、展开/收起评论、删除评论、删除动态
   document.addEventListener('click', (e) => {
     const likeBtn = e.target.closest('.like-btn');
