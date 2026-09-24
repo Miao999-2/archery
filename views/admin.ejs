@@ -78,5 +78,31 @@
       </ul>
     <% } %>
   </section>
+
+  <section>
+    <h2>日志管理</h2>
+    <p><a class="btn small" href="/logs/new">＋ 创建日志</a></p>
+    <% if (!logs.length) { %>
+      <p class="muted">还没有日志。</p>
+    <% } else { %>
+      <ul class="posts">
+        <% logs.forEach(l => { %>
+          <li class="post">
+            <div class="post-meta">
+              <span class="post-user"><%= l.title %></span>
+              <span class="post-time"><%= l.created_at %></span>
+            </div>
+            <p class="muted"><%= l.admin_name %> 发布<% if (l.video_url) { %> · 含视频<% } %></p>
+            <p>
+              <a class="link-btn" href="/logs/<%= l.id %>/edit">编辑</a>
+              <form method="post" action="/logs/<%= l.id %>/delete" class="inline" onsubmit="return confirm('确定删除这篇日志？')">
+                <button class="link-btn del" type="submit">删除</button>
+              </form>
+            </p>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </section>
 </div>
 <%- include('partials/foot') %>
