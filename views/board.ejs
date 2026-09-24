@@ -43,8 +43,8 @@
               <% cList.forEach(c => { %>
                 <li class="post-comment<%= c.parent_id ? ' is-reply' : '' %>" data-cid="<%= c.id %>">
                   <% if (c.avatar) { %><img class="avatar-xs" src="<%= c.avatar %>" alt=""><% } %>
-                  <span class="post-comment-user"><%= c.display_name %>：</span>
-                  <% if (c.reply_to) { %><span class="post-comment-replyto">回复 @<%= c.reply_to_display %>：</span><% } %>
+                  <a class="post-comment-user" href="/u/<%= c.username %>"><%= c.display_name %></a>：
+                  <% if (c.reply_to) { %><a class="post-comment-replyto" href="/u/<%= c.reply_to %>">回复 @<%= c.reply_to_display %></a>：<% } %>
                   <span class="post-comment-body"><%= c.content %></span>
                   <% if (user) { %>
                     <button class="link-btn reply-btn" data-cid="<%= c.id %>" data-user="<%= c.display_name %>" type="button">回复</button>
@@ -96,8 +96,8 @@
     const name = c.display_name || c.username;
     const replyTo = c.reply_to_display || c.reply_to;
     li.innerHTML =
-      '<span class="post-comment-user"></span>' +
-      (c.reply_to ? '<span class="post-comment-replyto"></span>' : '') +
+      '<a class="post-comment-user"></a>' +
+      (c.reply_to ? '<a class="post-comment-replyto"></a>' : '') +
       '<span class="post-comment-body"></span>' +
       (currentUser ? '<button class="link-btn reply-btn" type="button">回复</button>' : '') +
       (canDel ? '<button class="link-btn del-comment" type="button">删除</button>' : '');
@@ -107,8 +107,14 @@
       img.src = c.avatar;
       li.insertBefore(img, li.firstChild);
     }
-    li.querySelector('.post-comment-user').textContent = name + '：';
-    if (c.reply_to) li.querySelector('.post-comment-replyto').textContent = '回复 @' + replyTo + '：';
+    const ulink = li.querySelector('.post-comment-user');
+    ulink.href = '/u/' + encodeURIComponent(c.username);
+    ulink.textContent = name + '：';
+    if (c.reply_to) {
+      const rlink = li.querySelector('.post-comment-replyto');
+      rlink.href = '/u/' + encodeURIComponent(c.reply_to);
+      rlink.textContent = '回复 @' + replyTo + '：';
+    }
     li.querySelector('.post-comment-body').textContent = c.content;
     if (currentUser) {
       const rb = li.querySelector('.reply-btn');
