@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS post_comments (
 
 function now() { return new Date().toISOString(); }
 
+// 把 WAL 日志合并进主数据库文件（备份前调用，确保 data.sqlite 是完整快照）
+function checkpoint() {
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) { /* 忽略 */ }
+}
+
 // ---------- 网站内容 ----------
 function getContent() {
   let stored = {};
@@ -278,4 +283,5 @@ module.exports = {
   addDanmaku, listDanmaku,
   createNotice, listNotices, deleteNotice,
   addPostComment, listPostCommentsByPosts, deletePostComment,
+  checkpoint,
 };
