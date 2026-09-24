@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: "npm install"
-    startCommand: "node server.js"
+    startCommand: "npm start"
     envVars:
       - key: SESSION_SECRET
         generateValue: true
