@@ -88,7 +88,10 @@ const upload = multer({
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
 app.get('/about', (req, res) => res.render('about', { content: db.getContent() }));
-app.get('/board', (req, res) => res.render('board', { posts: db.listPosts() }));
+app.get('/board', (req, res) => {
+  const posts = db.listPosts();
+  res.render('board', { posts, commentsByPost: db.listPostCommentsByPosts(posts.map((p) => p.id)) });
+});
 
 app.get('/login', (req, res) => res.render('login', { error: null }));
 app.post('/login', (req, res) => {
@@ -209,6 +212,21 @@ app.post('/logs/:id/comments', requireLogin, (req, res) => {
   res.redirect('/logs/' + req.params.id + '#comments');
 });
 
+// ---------- 通知（仅管理员发布） ----------
+app.get('/notices', (req, res) => res.render('notices', { notices: db.listNotices() }));
+app.post('/notices', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const title = String(b.title || '').trim();
+  const content = String(b.content || '').trim();
+  if (!title) return res.redirect('/notices');
+  db.createNotice(req.session.user.id, title, content);
+  res.redirect('/notices');
+});
+app.post('/notices/:id/delete', requireAdmin, (req, res) => {
+  db.deleteNotice(req.params.id);
+  res.redirect('/notices');
+});
+
 // ---------- Socket.io 实时交互 ----------
 io.on('connection', (socket) => {
   const user = socket.request.session && socket.request.session.user;
@@ -231,6 +249,26 @@ io.on('connection', (socket) => {
     const isAdmin = fresh && fresh.role === 'admin';
     const ok = isAdmin ? db.deletePostAsAdmin(id) : db.deletePost(id, user.id);
     if (ok) io.emit('post:deleted', { id });
+  });
+
+  // 评论动态 → 存库 + 实时广播给所有在线用户
+  socket.on('post:comment:send', (payload) => {
+    if (!user) return;
+    const postId = Number(payload && payload.postId);
+    const content = String((payload && payload.content) || '').trim();
+    if (!postId || !content || content.length > 200) return;
+    const c = db.addPostComment(postId, user.id, content);
+    if (c) io.emit('post:comment:new', c);
+  });
+
+  // 删除评论 → 本人删自己的，管理员删任意
+  socket.on('post:comment:delete', (payload) => {
+    if (!user) return;
+    const id = Number(payload && payload.id);
+    const fresh = db.findUser(user.username);
+    const isAdmin = fresh && fresh.role === 'admin';
+    const ok = db.deletePostComment(id, user.id, isAdmin);
+    if (ok) io.emit('post:comment:deleted', { id });
   });
 
   // 加入某个日志的弹幕房间
