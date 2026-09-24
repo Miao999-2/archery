@@ -209,3 +209,15 @@ a:hover { color: var(--gold-dk); }
 .avatar-form { display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .avatar-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
 .avatar-form input[type="file"] { font-size: 13px; }
+
+/* ---------- 动态墙配图 ---------- */
+.post-image { max-width: 100%; border-radius: 8px; margin-top: 8px; display: block; }
+.post-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.post-form-foot .btn { align-self: center; }
+.post-image-pick { cursor: pointer; color: var(--navy2); font-size: 14px; }
+.post-image-pick input[type="file"] { display: none; }
+.post-image-preview { max-width: 160px; max-height: 160px; border-radius: 8px; margin-top: 4px; object-fit: cover; }
+
+/* ---------- 通知置顶 ---------- */
+.badge.pinned { background: var(--gold); color: #fff; }
+.notice-item.pinned { border-color: var(--gold); }
