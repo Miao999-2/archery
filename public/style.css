@@ -200,6 +200,7 @@ a:hover { color: var(--gold-dk); }
 .profile-head { display: flex; gap: 20px; align-items: center; margin: 10px 0 30px; }
 .profile-info h1 { color: var(--navy); font-size: 26px; }
 .profile-info .btn { margin-top: 8px; }
+.profile-bio { color: var(--ink); margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
 .profile h2 { color: var(--navy); margin: 20px 0 10px; font-size: 20px; }
 
 .settings { max-width: 560px; }
