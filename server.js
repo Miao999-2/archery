@@ -27,8 +27,35 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // 会话（socket.io 与 http 共享，实现登录状态打通）
+// 登录态持久化到 SQLite（随数据一起备份）：服务器重启 / 更新后仍保持登录；cookie 有效期一周
+class SQLiteSessionStore extends session.Store {
+  get(sid, cb) {
+    try {
+      const raw = db.getSession(sid);
+      cb(null, raw ? JSON.parse(raw) : null);
+    } catch (e) { cb(e); }
+  }
+  set(sid, sess, cb) {
+    try {
+      const maxAge = sess && sess.cookie && sess.cookie.maxAge ? sess.cookie.maxAge : null;
+      db.setSession(sid, JSON.stringify(sess), maxAge);
+      cb(null);
+    } catch (e) { cb(e); }
+  }
+  destroy(sid, cb) {
+    try { db.destroySession(sid); cb(null); } catch (e) { cb(e); }
+  }
+  touch(sid, sess, cb) {
+    try {
+      const maxAge = sess && sess.cookie && sess.cookie.maxAge ? sess.cookie.maxAge : null;
+      db.touchSession(sid, maxAge);
+      cb(null);
+    } catch (e) { cb(e); }
+  }
+}
 const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || 'archery-dev-secret-change-me',
+  store: new SQLiteSessionStore(),
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 1000 * 60 * 60 * 24 * 7, httpOnly: true },
@@ -104,6 +131,13 @@ const avatarUpload = multer({
   fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|gif)$/i.test(file.originalname || '')),
 });
 
+// 动态墙配图上传（同头像：内存存储 + 压缩后 base64 存库）
+const postImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /\.(png|jpe?g|gif)$/i.test(file.originalname || '')),
+});
+
 // 判断图片是否真的包含透明像素（jimp 解出的位图通常都带 alpha 通道，不能用 hasAlpha() 判断）
 function hasTransparency(img) {
   const data = img.bitmap.data;
@@ -113,18 +147,21 @@ function hasTransparency(img) {
   return false;
 }
 
-// 压缩头像：最长边超过 512 则等比缩小（保持宽高比、不拉伸不补边）；有透明则保留 PNG，否则转 JPEG 减小体积
+// 压缩图片：最长边超过 maxDim 则等比缩小（保持宽高比、不拉伸不补边）；有透明则保留 PNG，否则转 JPEG 减小体积
 const AVATAR_MAX_DIM = 512;
-async function compressAvatar(buffer) {
+const POST_IMAGE_MAX_DIM = 1280;
+async function compressImage(buffer, maxDim) {
   const img = await Jimp.read(buffer);
-  if (img.width > AVATAR_MAX_DIM || img.height > AVATAR_MAX_DIM) {
-    const scale = Math.min(AVATAR_MAX_DIM / img.width, AVATAR_MAX_DIM / img.height);
+  if (img.width > maxDim || img.height > maxDim) {
+    const scale = Math.min(maxDim / img.width, maxDim / img.height);
     img.resize({ w: Math.max(1, Math.round(img.width * scale)), h: Math.max(1, Math.round(img.height * scale)) });
   }
   const mime = hasTransparency(img) ? 'image/png' : 'image/jpeg';
   const out = await img.getBuffer(mime, { quality: 82 });
   return { mime, buffer: out };
 }
+const compressAvatar = (buffer) => compressImage(buffer, AVATAR_MAX_DIM);
+const compressPostImage = (buffer) => compressImage(buffer, POST_IMAGE_MAX_DIM);
 
 // ---------- 页面路由 ----------
 app.get('/', (req, res) => res.render('index', { content: db.getContent() }));
@@ -226,6 +263,28 @@ app.post('/settings/avatar', requireLogin, (req, res) => {
       res.redirect('/settings?ok=1');
     } catch (e) {
       res.redirect('/settings?err=avatar'); // 图片损坏或无法解码
+    }
+  });
+});
+
+// ---------- 发布动态（支持可选图片，图片压缩后存库；成功后 socket 广播给所有在线用户） ----------
+app.post('/api/post', requireLogin, (req, res) => {
+  postImageUpload.single('image')(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: '图片上传失败：仅支持 PNG / JPG / JPEG / GIF，且不超过 20MB' });
+    try {
+      const content = String((req.body && req.body.content) || '').trim();
+      let image = '';
+      if (req.file) {
+        const { mime, buffer } = await compressPostImage(req.file.buffer);
+        image = `data:${mime};base64,${buffer.toString('base64')}`;
+      }
+      if (!content && !image) return res.status(400).json({ error: '内容或图片不能都为空' });
+      if (content.length > 500) return res.status(400).json({ error: '内容过长' });
+      const post = db.createPost(req.session.user.id, content, image);
+      io.emit('post:new', post);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ error: '发布失败' });
     }
   });
 });
@@ -348,6 +407,11 @@ app.post('/notices', requireAdmin, (req, res) => {
   db.createNotice(req.session.user.id, title, content);
   res.redirect('/notices');
 });
+app.post('/notices/:id/pin', requireAdmin, (req, res) => {
+  const n = db.getNotice(req.params.id);
+  if (n) db.setNoticePinned(req.params.id, n.pinned ? 0 : 1);
+  res.redirect('/notices');
+});
 app.post('/notices/:id/delete', requireAdmin, (req, res) => {
   db.deleteNotice(req.params.id);
   res.redirect('/notices');
@@ -357,15 +421,6 @@ app.post('/notices/:id/delete', requireAdmin, (req, res) => {
 io.on('connection', (socket) => {
   const user = socket.request.session && socket.request.session.user;
   socket.emit('user:init', { user: user || null });
-
-  // 发布动态 → 广播给所有在线用户（实时）
-  socket.on('post:create', (payload) => {
-    if (!user) return;
-    const content = String((payload && payload.content) || '').trim();
-    if (!content || content.length > 500) return;
-    const post = db.createPost(user.id, content);
-    io.emit('post:new', post);
-  });
 
   // 删除动态 → 本人删自己的，管理员删任意
   socket.on('post:delete', (payload) => {
@@ -438,6 +493,7 @@ server.listen(PORT, () => {
 // ---------- 数据持久化：定期 + 退出时备份到 GitHub 私密仓库 ----------
 async function doBackup() {
   try {
+    db.cleanupSessions(); // 顺手清理过期会话，避免表无限增长
     db.checkpoint();
     await backup.uploadBackup();
   } catch (e) { /* 备份失败不影响主流程 */ }
