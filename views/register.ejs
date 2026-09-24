@@ -3,11 +3,13 @@
 <section class="auth">
   <h1>注册</h1>
   <% if (error) { %><p class="error"><%= error %></p><% } %>
+  <p class="muted">注册后需管理员审批通过方可登录，请认真填写申请理由。</p>
   <form method="post" action="/register" class="form">
-    <label>用户名（至少 2 个字符）<input name="username" autocomplete="username" required></label>
+    <label>用户名（用于登录，至少 2 个字符）<input name="username" autocomplete="username" required></label>
     <label>邮箱（可选）<input name="email" type="email" autocomplete="email"></label>
     <label>密码（至少 6 位）<input name="password" type="password" autocomplete="new-password" required></label>
-    <button class="btn" type="submit">注册</button>
+    <label>申请理由（必填，200 字以内）<textarea name="reason" rows="3" maxlength="200" required placeholder="例如：我是队内成员，想查看训练安排"></textarea></label>
+    <button class="btn" type="submit">提交申请</button>
   </form>
   <p class="muted">已有账号？<a href="/login">去登录</a></p>
 </section>
