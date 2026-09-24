@@ -149,3 +149,20 @@ a:hover { color: var(--gold-dk); }
 .log-form { display: flex; flex-direction: column; gap: 12px; }
 .upload-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .upload-row .admin-field { flex: 1; min-width: 220px; }
+
+/* ---------- 通知 ---------- */
+.notice-form { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 18px 0; }
+.notice-item .post-user { font-size: 16px; }
+
+/* ---------- 动态墙评论 ---------- */
+.post-comments { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.comment-toggle { font-size: 13px; }
+.post-comments-body { margin-top: 8px; }
+.post-comment-list { list-style: none; }
+.post-comment { padding: 6px 0; font-size: 14px; border-bottom: 1px solid #f0ece2; }
+.post-comment:last-child { border-bottom: none; }
+.post-comment-user { font-weight: 700; color: var(--navy2); margin-right: 2px; }
+.post-comment-body { color: var(--ink); word-break: break-word; }
+.post-comment .del-comment { font-size: 12px; margin-left: 6px; }
+.comment-inline { display: flex; gap: 8px; margin-top: 8px; }
+.comment-inline input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 14px; }
