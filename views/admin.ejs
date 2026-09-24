@@ -129,6 +129,7 @@
               <span class="post-time"><%= p.created_at %></span>
             </div>
             <p class="post-content"><%= p.content %></p>
+            <% if (p.image) { %><img class="post-image" src="<%= p.image %>" alt=""><% } %>
             <form method="post" action="/admin/posts/<%= p.id %>/delete" class="inline">
               <button class="link-btn del" type="submit">删除</button>
             </form>
